@@ -529,7 +529,7 @@ def mercado_pago_webhook():
     if notificacion.get("type") != "order":
         return "", 200
 
-    if notificacion.get("live_mode") is not False:
+    if notificacion.get("live_mode") is not True:
         app.logger.warning("Se ignoró una notificación que no es de prueba.")
         return "", 200
 

@@ -3,15 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}AUTOMATCH{% endblock %}</title>
+  <title>{% block title %}AUTOMATCHCBA{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="{{ url_for('index') }}">AUTO<span>MATCH</span></a>
+  <a class="brand" href="{{ url_for('index') }}" aria-label="AUTOMATCHCBA">
+    AUTO<span>MATCH</span>CBA
+  </a>
   <nav>
-    <a href="{{ url_for('index') }}">Comprar</a>
+    <a href="{{ url_for('index') }}">Inicio</a>
+    <a href="{{ url_for('index') }}">Vehículos</a>
     {% if usuario_actual %}
+      <a href="{{ url_for('favorites') }}">Mis favoritos</a>
       <a class="nav-cta" href="{{ url_for('publish') }}">Publicar vehículo</a>
       <span class="nav-user">Hola, {{ usuario_actual.name }}</span>
       <a href="{{ url_for('logout') }}">Salir</a>
@@ -31,6 +35,6 @@
   {% endwith %}
   {% block content %}{% endblock %}
 </main>
-<footer>AUTOMATCH · Encontrá tu próximo vehículo</footer>
+<footer>AUTOMATCHCBA · Encontrá tu próximo vehículo</footer>
 </body>
 </html>

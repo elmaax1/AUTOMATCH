@@ -56,7 +56,7 @@ def get_s3_client():
     faltantes = [nombre for nombre in variables if not os.environ.get(nombre)]
     if faltantes:
         raise RuntimeError(
-            "Faltan variables de configuración de Supabase Storage: "
+            "Faltan variables de configuraciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n de Supabase Storage: "
             + ", ".join(faltantes)
         )
 
@@ -107,7 +107,7 @@ def get_public_photo_url(filename):
 def get_db():
     url = os.environ.get("DATABASE_URL")
     if not url:
-        raise RuntimeError("No se encontró DATABASE_URL en la configuración.")
+        raise RuntimeError("No se encontrÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ DATABASE_URL en la configuraciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n.")
     return psycopg.connect(url, row_factory=dict_row)
 
 
@@ -124,14 +124,17 @@ def current_user():
 
 @app.context_processor
 def inject_user():
-    return {"usuario_actual": current_user()}
+    return {
+        "usuario_actual": current_user(),
+        "csrf_token": get_form_csrf_token()
+    }
 
 
 def login_required(view):
     @wraps(view)
     def wrapped_view(*args, **kwargs):
         if not session.get("user_id"):
-            flash("Para continuar, primero tenés que ingresar a tu cuenta.", "error")
+            flash("Para continuar, primero tenÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â©s que ingresar a tu cuenta.", "error")
             return redirect(url_for("login", next=request.path))
         return view(*args, **kwargs)
     return wrapped_view
@@ -196,11 +199,16 @@ def index():
                  AND v.featured_until > CURRENT_TIMESTAMP
                  THEN 1 ELSE 0 END AS is_featured_active,
             (SELECT filename FROM vehicle_photos p
-             WHERE p.vehicle_id = v.id ORDER BY p.id LIMIT 1) AS photo
+             WHERE p.vehicle_id = v.id ORDER BY p.id LIMIT 1) AS photo,
+            EXISTS (
+                SELECT 1 FROM favorites f
+                WHERE f.vehicle_id = v.id
+                  AND f.user_id = %s
+            ) AS is_favorite
             FROM vehicles v
             WHERE v.status = 'published'
         """
-        params = []
+        params = [session.get("user_id")]
         if query:
             sql += " AND (v.brand ILIKE %s OR v.model ILIKE %s OR v.location ILIKE %s)"
             term = f"%{query}%"
@@ -213,7 +221,7 @@ def index():
                 sql += " AND v.price <= %s"
                 params.append(float(max_price))
             except ValueError:
-                flash("El precio máximo debe ser un número.", "error")
+                flash("El precio mÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ximo debe ser un nÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âºmero.", "error")
         sql += " ORDER BY CASE WHEN v.featured = 1 AND v.featured_until > CURRENT_TIMESTAMP THEN 1 ELSE 0 END DESC, v.created_at DESC" 
         with get_db() as db:
             vehicles = db.execute(sql, params).fetchall()
@@ -222,14 +230,14 @@ def index():
             selected_category=category, max_price=max_price
         )
 
-    # Visitantes: la consulta solo obtiene ID, nombre principal y fotografía.
+    # Visitantes: la consulta solo obtiene ID, nombre principal y fotografÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­a.
     sql = """
         SELECT v.id, v.brand, v.model,
         CASE WHEN v.featured = 1 AND v.featured_until IS NOT NULL
              AND v.featured_until > CURRENT_TIMESTAMP
              THEN 1 ELSE 0 END AS is_featured_active,
         (SELECT filename FROM vehicle_photos p
-         WHERE p.vehicle_id = v.id ORDER BY p.id LIMIT 1) AS photo
+             WHERE p.vehicle_id = v.id ORDER BY p.id LIMIT 1) AS photo
         FROM vehicles v
         WHERE v.status = 'published'
     """
@@ -263,6 +271,68 @@ def verify_form_csrf():
     if not token or not secrets.compare_digest(token, enviado):
         abort(400)
 
+@app.route("/vehiculo/<int:vehicle_id>/favorito", methods=["POST"])
+@login_required
+def toggle_favorite(vehicle_id):
+    verify_form_csrf()
+    user_id = session.get("user_id")
+
+    with get_db() as db:
+        vehicle = db.execute(
+            "SELECT id FROM vehicles WHERE id = %s AND status = 'published'",
+            (vehicle_id,)
+        ).fetchone()
+
+        if not vehicle:
+            abort(404)
+
+        existing = db.execute(
+            "SELECT 1 FROM favorites WHERE user_id = %s AND vehicle_id = %s",
+            (user_id, vehicle_id)
+        ).fetchone()
+
+        if existing:
+            db.execute(
+                "DELETE FROM favorites WHERE user_id = %s AND vehicle_id = %s",
+                (user_id, vehicle_id)
+            )
+            flash("Vehiculo eliminado de favoritos.", "success")
+        else:
+            db.execute(
+                "INSERT INTO favorites (user_id, vehicle_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                (user_id, vehicle_id)
+            )
+            flash("Vehiculo guardado en favoritos.", "success")
+
+    return redirect(url_for("index"))
+
+@app.route("/favoritos")
+@login_required
+def favorites():
+    user_id = session.get("user_id")
+
+    with get_db() as db:
+        vehicles = db.execute(
+            """
+            SELECT v.*,
+                CASE WHEN v.featured = 1
+                     AND v.featured_until IS NOT NULL
+                     AND v.featured_until > CURRENT_TIMESTAMP
+                     THEN 1 ELSE 0 END AS is_featured_active,
+                (SELECT filename FROM vehicle_photos p
+                 WHERE p.vehicle_id = v.id
+                 ORDER BY p.id LIMIT 1) AS photo
+            FROM favorites f
+            JOIN vehicles v ON v.id = f.vehicle_id
+            WHERE f.user_id = %s
+              AND v.status = 'published'
+            ORDER BY f.created_at DESC
+            """,
+            (user_id,)
+        ).fetchall()
+
+    return render_template("favorites.html", vehicles=vehicles)
+
 @app.route("/registro", methods=["GET", "POST"])
 def register():
     if session.get("user_id"):
@@ -276,11 +346,11 @@ def register():
         confirmation = request.form.get("password_confirmation", "")
 
         if not name or not email or not phone or not password:
-            flash("Completá todos los campos obligatorios.", "error")
+            flash("CompletÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ todos los campos obligatorios.", "error")
         elif len(password) < 8:
-            flash("La contraseña debe tener al menos 8 caracteres.", "error")
+            flash("La contraseÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±a debe tener al menos 8 caracteres.", "error")
         elif password != confirmation:
-            flash("Las contraseñas no coinciden.", "error")
+            flash("Las contraseÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±as no coinciden.", "error")
         else:
             try:
                 with get_db() as db:
@@ -290,10 +360,10 @@ def register():
                     )
                     session.clear()
                     session["user_id"] = cursor.fetchone()["id"]
-                flash("Tu cuenta fue creada correctamente. ¡Bienvenido a AUTOMATCH!", "success")
+                flash("Tu cuenta fue creada correctamente. ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡Bienvenido a AUTOMATCH!", "success")
                 return redirect(url_for("index"))
             except psycopg.IntegrityError:
-                flash("Ya existe una cuenta registrada con ese correo electrónico.", "error")
+                flash("Ya existe una cuenta registrada con ese correo electrÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³nico.", "error")
     return render_template("register.html", csrf_token=get_form_csrf_token())
 
 
@@ -314,7 +384,7 @@ def login():
             if not destination.startswith("/") or destination.startswith("//"):
                 destination = url_for("index")
             return redirect(destination)
-        flash("El correo electrónico o la contraseña son incorrectos.", "error")
+        flash("El correo electrÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³nico o la contraseÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±a son incorrectos.", "error")
     return render_template("login.html", csrf_token=get_form_csrf_token())
 
 
@@ -322,7 +392,7 @@ def login():
 @login_required
 def logout():
     session.clear()
-    flash("Cerraste tu sesión correctamente.", "success")
+    flash("Cerraste tu sesiÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n correctamente.", "success")
     return redirect(url_for("index"))
 
 
@@ -335,7 +405,7 @@ def publish():
                     "location", "contact_name", "whatsapp"]
         missing = [field for field in required if not request.form.get(field, "").strip()]
         if missing:
-            flash("Completá todos los campos obligatorios.", "error")
+            flash("CompletÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ todos los campos obligatorios.", "error")
             return redirect(url_for("publish"))
 
         try:
@@ -345,7 +415,7 @@ def publish():
             if year < 1900 or year > 2100 or price <= 0 or kilometers < 0:
                 raise ValueError
         except ValueError:
-            flash("Revisá el año, el precio y los kilómetros.", "error")
+            flash("RevisÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ el aÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±o, el precio y los kilÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³metros.", "error")
             return redirect(url_for("publish"))
 
         fotografias = []
@@ -421,7 +491,7 @@ def publish():
             )
             return redirect(url_for("publish"))
 
-        flash("¡Tu vehículo ya está publicado en AUTOMATCH!", "success")
+        flash("ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡Tu vehÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­culo ya estÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ publicado en AUTOMATCH!", "success")
         return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id))
     return render_template("publish.html", csrf_token=get_form_csrf_token())
 
@@ -499,12 +569,12 @@ def vehicle_feature_payment(vehicle_id):
         "processing_mode": "manual",
         "total_amount": f"{importe:.2f}",
         "external_reference": referencia,
-        "description": f"Destacado AUTOMATCH por {dias} días",
+        "description": f"Destacado AUTOMATCH por {dias} dÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­as",
         "payer": {
             "email": user["email"]
         },
         "items": [{
-            "title": f"Publicación destacada por {dias} días",
+            "title": f"PublicaciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n destacada por {dias} dÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­as",
             "unit_price": f"{importe:.2f}",
             "quantity": 1
         }]
@@ -525,7 +595,7 @@ def vehicle_feature_payment(vehicle_id):
         resultado = respuesta.json()
 
         if not respuesta.ok:
-            raise ValueError("Mercado Pago no aceptó la orden.")
+            raise ValueError("Mercado Pago no aceptÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ la orden.")
 
         order_id = resultado.get("id")
         checkout_url = resultado.get("checkout_url")
@@ -541,7 +611,7 @@ def vehicle_feature_payment(vehicle_id):
             """, (order_id, checkout_url, referencia))
 
         if not checkout_url.startswith("https://"):
-            raise ValueError("La dirección de pago no es segura.")
+            raise ValueError("La direcciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n de pago no es segura.")
 
         return redirect(checkout_url)
 
@@ -555,7 +625,7 @@ def vehicle_feature_payment(vehicle_id):
 
         app.logger.exception("No se pudo crear la orden de Mercado Pago.")
         flash(
-            "No pudimos iniciar el pago. Revisá la configuración e intentá nuevamente.",
+            "No pudimos iniciar el pago. RevisÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ la configuraciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n e intentÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ nuevamente.",
             "error"
         )
         return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id))
@@ -614,14 +684,14 @@ def mercado_pago_webhook():
         return "", 400
 
     if not verificar_firma_mercadopago(data_id):
-        app.logger.warning("Firma de Webhook inválida.")
+        app.logger.warning("Firma de Webhook invÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡lida.")
         return "", 401
 
     if notificacion.get("type") != "order":
         return "", 200
 
     if notificacion.get("live_mode") is not True:
-        app.logger.warning("Se ignoró una notificación que no es de prueba.")
+        app.logger.warning("Se ignorÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ una notificaciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n que no es de prueba.")
         return "", 200
 
     try:
@@ -699,7 +769,7 @@ def mercado_pago_webhook():
 
         if not vehiculo:
             app.logger.error(
-                "Pago acreditado, pero el vehículo %s no existe o no está publicado.",
+                "Pago acreditado, pero el vehÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­culo %s no existe o no estÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ publicado.",
                 pago["vehicle_id"]
             )
             return "", 200
@@ -717,7 +787,7 @@ def mercado_pago_webhook():
         """, (dias, pago["vehicle_id"])).fetchone()
 
         if not vehiculo_actualizado or not vehiculo_actualizado["featured"]:
-            app.logger.error("No se pudo activar el destacado del vehículo.")
+            app.logger.error("No se pudo activar el destacado del vehÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­culo.")
             return "", 200
 
         vencimiento = vehiculo_actualizado["featured_until"]
@@ -827,7 +897,7 @@ def vehicle_delete(vehicle_id):
 
 @app.errorhandler(413)
 def too_large(_error):
-    flash("Las fotografías superan el límite permitido de 8 MB por solicitud.", "error")
+    flash("Las fotografÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­as superan el lÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­mite permitido de 8 MB por solicitud.", "error")
     return redirect(url_for("publish"))
 
 
@@ -934,7 +1004,7 @@ def admin_vehicle_edit(vehicle_id):
         ]
 
         if missing:
-            flash("Completá todos los campos obligatorios.", "error")
+            flash("CompletÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ todos los campos obligatorios.", "error")
             return redirect(url_for("admin_vehicle_edit", vehicle_id=vehicle_id))
 
         try:
@@ -945,7 +1015,7 @@ def admin_vehicle_edit(vehicle_id):
             if year < 1900 or year > 2100 or price <= 0 or kilometers < 0:
                 raise ValueError
         except ValueError:
-            flash("Revisá el año, el precio y los kilómetros.", "error")
+            flash("RevisÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ el aÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±o, el precio y los kilÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³metros.", "error")
             return redirect(url_for("admin_vehicle_edit", vehicle_id=vehicle_id))
 
         accepts_trade = 1 if request.form.get("accepts_trade") == "on" else 0
@@ -987,7 +1057,7 @@ def admin_vehicle_edit(vehicle_id):
             if result.rowcount == 0:
                 abort(404)
 
-        flash("Vehículo actualizado correctamente.", "success")
+        flash("VehÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­culo actualizado correctamente.", "success")
         return redirect(url_for("admin_dashboard"))
 
     if not session.get("admin_csrf_token"):
@@ -1029,9 +1099,9 @@ def admin_vehicle_status(vehicle_id):
             abort(404)
 
     if new_status == "published":
-        flash("La publicación fue reactivada.", "success")
+        flash("La publicaciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n fue reactivada.", "success")
     else:
-        flash("La publicación fue suspendida.", "success")
+        flash("La publicaciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n fue suspendida.", "success")
 
     return redirect(url_for("admin_dashboard"))
 
@@ -1067,7 +1137,7 @@ def admin_vehicle_delete(vehicle_id):
             (vehicle_id,)
         )
 
-    # Los archivos se eliminan solamente después de borrar los registros.
+    # Los archivos se eliminan solamente despuÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â©s de borrar los registros.
     for filename in filenames:
         if not filename or Path(filename).name != filename:
             continue
@@ -1090,7 +1160,7 @@ def admin_vehicle_delete(vehicle_id):
                     filename
                 )
 
-    flash("El vehículo y sus fotografías fueron eliminados.", "success")
+    flash("El vehÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­culo y sus fotografÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­as fueron eliminados.", "success")
     return redirect(url_for("admin_dashboard"))
 
 

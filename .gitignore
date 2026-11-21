@@ -1,0 +1,21 @@
+
+.env
+# Secretos y credenciales
+.automatch_secret
+# Entorno Python
+.venv/
+__pycache__/
+*.pyc
+# Archivos locales y respaldos
+uploads/
+*.db
+*.sqlite
+*.zip
+*.respaldo
+*.antes_*
+respaldo_*/
+*.respaldo_*
+*.sqlite_respaldo
+app_con_error_*.py
+.gitignore.respaldo_*
+*.sqlite3

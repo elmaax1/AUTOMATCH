@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Editar veh?culo | AUTOMATCH{% endblock %}
+
+{% block content %}
+<div class="form-page">
+    <p class="eyebrow">ADMINISTRACI?N</p>
+    <h1>Editar veh?culo</h1>
+    <p class="muted">Modific? los datos de esta publicaci?n.</p>
+
+    <form method="POST" class="form-card">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+        <div class="form-grid">
+            <label>Tipo de veh?culo *
+                <select name="category" required>
+                    {% for item in ["Auto", "Moto", "Camioneta", "Utilitario", "Cami?n", "Otro"] %}
+                    <option value="{{ item }}" {% if vehicle.category == item %}selected{% endif %}>{{ item }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            <label>Marca *
+                <input name="brand" value="{{ vehicle.brand }}" required>
+            </label>
+
+            <label>Modelo *
+                <input name="model" value="{{ vehicle.model }}" required>
+            </label>
+
+            <label>A?o *
+                <input name="year" type="number" min="1900" max="2100" value="{{ vehicle.year }}" required>
+            </label>
+
+            <label>Kil?metros
+                <input name="kilometers" type="number" min="0" value="{{ vehicle.kilometers or 0 }}">
+            </label>
+
+            <label>Precio solicitado ($) *
+                <input name="price" type="number" min="1" step="0.01" value="{{ vehicle.price }}" required>
+            </label>
+
+            <label class="full">Localidad y provincia *
+                <input name="location" value="{{ vehicle.location }}" required>
+            </label>
+
+            <label class="full">Descripci?n
+                <textarea name="description" rows="4">{{ vehicle.description or "" }}</textarea>
+            </label>
+        </div>
+
+        <h2>Datos de contacto</h2>
+
+        <div class="form-grid">
+            <label>Nombre *
+                <input name="contact_name" value="{{ vehicle.contact_name }}" required>
+            </label>
+
+            <label>WhatsApp *
+                <input name="whatsapp" value="{{ vehicle.whatsapp }}" required>
+            </label>
+
+            <label class="full">Correo electr?nico
+                <input name="email" type="email" value="{{ vehicle.email or '' }}">
+            </label>
+        </div>
+
+        <label class="check">
+            <input type="checkbox" name="accepts_trade" {% if vehicle.accepts_trade %}checked{% endif %}>
+            Acepta permutas
+        </label>
+
+        <label>?Qu? veh?culo le interesa recibir?
+            <input name="trade_details" value="{{ vehicle.trade_details or '' }}">
+        </label>
+
+        <button class="button" type="submit">Guardar cambios</button>
+        <a href="{{ url_for('admin_dashboard') }}" class="button">Cancelar</a>
+    </form>
+</div>
+{% endblock %}

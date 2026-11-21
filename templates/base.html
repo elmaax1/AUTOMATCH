@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}AUTOMATCH{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="{{ url_for('index') }}">AUTO<span>MATCH</span></a>
+  <nav>
+    <a href="{{ url_for('index') }}">Comprar</a>
+    {% if usuario_actual %}
+      <a class="nav-cta" href="{{ url_for('publish') }}">Publicar vehículo</a>
+      <span class="nav-user">Hola, {{ usuario_actual.name }}</span>
+      <a href="{{ url_for('logout') }}">Salir</a>
+    {% else %}
+      <a href="{{ url_for('login') }}">Ingresar</a>
+      <a class="nav-cta" href="{{ url_for('register') }}">Crear cuenta</a>
+    {% endif %}
+  </nav>
+</header>
+<main class="container">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="notice {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</main>
+<footer>AUTOMATCH · Encontrá tu próximo vehículo</footer>
+</body>
+</html>

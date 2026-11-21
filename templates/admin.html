@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block title %}Administraci?n | AUTOMATCH{% endblock %}
+
+{% block content %}
+<section class="form-page">
+    <p class="eyebrow">PANEL DE CONTROL</p>
+    <h1>Administraci?n de AUTOMATCH</h1>
+    <p class="muted">Centro de control de usuarios y publicaciones.</p>
+
+    <div class="grid" style="margin-top:30px;">
+        <article class="vehicle-card">
+            <div class="card-body">
+                <p class="muted">Usuarios registrados</p>
+                <h2>{{ total_users }}</h2>
+            </div>
+        </article>
+
+        <article class="vehicle-card">
+            <div class="card-body">
+                <p class="muted">Veh?culos totales</p>
+                <h2>{{ total_vehicles }}</h2>
+            </div>
+        </article>
+
+        <article class="vehicle-card">
+            <div class="card-body">
+                <p class="muted">Veh?culos publicados</p>
+                <h2>{{ published_vehicles }}</h2>
+            </div>
+        </article>
+
+        <article class="vehicle-card">
+            <div class="card-body">
+                <p class="muted">Veh?culos destacados</p>
+                <h2>{{ featured_vehicles }}</h2>
+            </div>
+        </article>
+    </div>
+
+    <section class="form-card" style="margin-top:30px;">
+        <h2>Usuarios registrados</h2>
+        <p class="muted">Se muestran hasta los ?ltimos 100 usuarios.</p>
+
+        <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse;">
+                <thead>
+                    <tr>
+                        <th style="text-align:left; padding:10px;">Nombre</th>
+                        <th style="text-align:left; padding:10px;">Correo</th>
+                        <th style="text-align:left; padding:10px;">Tel?fono</th>
+                        <th style="text-align:left; padding:10px;">Registro</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
+                    <tr>
+                        <td style="padding:10px;">{{ user.name }}</td>
+                        <td style="padding:10px;">{{ user.email }}</td>
+                        <td style="padding:10px;">{{ user.phone or "?" }}</td>
+                        <td style="padding:10px;">{{ user.created_at or "?" }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4" style="padding:10px;">Todav?a no hay usuarios.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="form-card" style="margin-top:30px;">
+        <h2>Administraci?n de veh?culos</h2>
+        <p class="muted">Se muestran hasta las ?ltimas 100 publicaciones.</p>
+
+        {% for vehicle in vehicles %}
+        <article class="vehicle-card" style="margin-top:18px;">
+            <div class="card-body">
+                <div style="display:flex; gap:15px; flex-wrap:wrap;">
+                    {% if vehicle.photo %}
+                    <img
+                        src="{{ url_for('uploaded_file', filename=vehicle.photo) }}"
+                        alt="Fotograf?a del veh?culo"
+                        style="width:130px; height:100px; object-fit:cover; border-radius:10px;"
+                    >
+                    {% endif %}
+
+                    <div>
+                        <h3>{{ vehicle.brand }} {{ vehicle.model }} ({{ vehicle.year }})</h3>
+                        <p>Precio: ${{ "%.2f"|format(vehicle.price) }}</p>
+                        <p>Ubicaci?n: {{ vehicle.location }}</p>
+                        <p>Propietario: {{ vehicle.owner_name or "Sin propietario asociado" }}</p>
+                        <p>Tel?fono: {{ vehicle.owner_phone or "No informado" }}</p>
+                        <p>
+                            Estado:
+                            {% if vehicle.status == "published" %}
+                                <strong>Publicado</strong>
+                            {% else %}
+                                <strong>Suspendido</strong>
+                            {% endif %}
+                        </p>
+                        {% if vehicle.featured %}
+                        <p>Publicaci?n destacada</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:15px;">
+                    <a href="{{ url_for('admin_vehicle_edit', vehicle_id=vehicle.id) }}" class="button">Editar veh?culo</a>
+                    
+                    <form method="POST" action="{{ url_for('admin_vehicle_status', vehicle_id=vehicle.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        {% if vehicle.status == "published" %}
+                        <input type="hidden" name="status" value="suspended">
+                        <button type="submit" class="button">Suspender publicaci?n</button>
+                        {% else %}
+                        <input type="hidden" name="status" value="published">
+                        <button type="submit" class="button">Reactivar publicaci?n</button>
+                        {% endif %}
+                    </form>
+
+                    <form method="POST"
+                          action="{{ url_for('admin_vehicle_delete', vehicle_id=vehicle.id) }}"
+                          onsubmit="return confirm('?Seguro que quer?s eliminar este veh?culo y sus fotograf?as? Esta acci?n no se puede deshacer.');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button type="submit" class="button">Eliminar veh?culo</button>
+                    </form>
+                </div>
+            </div>
+        </article>
+        {% else %}
+        <p>Todav?a no hay veh?culos publicados.</p>
+        {% endfor %}
+    </section>
+
+    <section class="form-card" style="margin-top:30px;">
+        <h2>Volver al cat?logo</h2>
+        <a href="{{ url_for('index') }}" class="button">Volver a AUTOMATCH</a>
+    </section>
+</section>
+{% endblock %}

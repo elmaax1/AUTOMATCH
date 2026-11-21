@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}AUTOMATCH | Comprar y vender vehículos{% endblock %}
+{% block content %}
+<section class="hero">
+  <p class="eyebrow">COMPRA · VENTA · PERMUTA</p>
+  <h1>Tu próximo vehículo<br><span>puede estar acá.</span></h1>
+  <p>Encontrá oportunidades y conectá con vendedores.</p>
+  {% if usuario_actual %}
+    <a class="button light" href="{{ url_for('publish') }}">Quiero vender</a>
+  {% else %}
+    <a class="button light" href="{{ url_for('register') }}">Crear cuenta para publicar</a>
+  {% endif %}
+</section>
+<section class="search-panel">
+  <h2>¿Qué vehículo estás buscando?</h2>
+  <form method="get" class="search-form">
+    <input name="q" value="{{ query }}" placeholder="Marca o modelo">
+    {% if usuario_actual %}
+    <select name="category">
+      <option value="">Todos los vehículos</option>
+      {% for item in ["Auto", "Moto", "Camioneta", "Utilitario", "Camión", "Otro"] %}
+      <option value="{{ item }}" {% if selected_category == item %}selected{% endif %}>{{ item }}</option>
+      {% endfor %}
+    </select>
+    <input name="max_price" type="number" min="1" step="any" value="{{ max_price }}" placeholder="Precio máximo">
+    {% endif %}
+    <button class="button" type="submit">Buscar</button>
+  </form>
+</section>
+<section class="section-heading">
+  <div><p class="eyebrow">CATÁLOGO</p><h2>Vehículos publicados</h2></div>
+  <span>{{ vehicles|length }} resultado(s)</span>
+</section>
+{% if vehicles %}
+<div class="grid">
+  {% for v in vehicles %}
+  <article class="vehicle-card">
+    {% if usuario_actual %}
+      <a href="{{ url_for('vehicle_detail', vehicle_id=v.id) }}" class="photo-wrap">
+    {% else %}
+      <a href="{{ url_for('login', next=url_for('vehicle_detail', vehicle_id=v.id)) }}" class="photo-wrap">
+    {% endif %}
+      {% if v.is_featured_active %}
+        <span class="featured-tag">DESTACADO</span>
+      {% endif %}
+      {% if v.photo %}
+        <img src="{{ url_for('uploaded_file', filename=v.photo) }}" alt="{{ v.brand }} {{ v.model }}">
+      {% else %}
+        <div class="no-photo">Sin fotografía</div>
+      {% endif %}
+    </a>
+    <div class="card-body public-card-body">
+      <h3>{{ v.brand }} {{ v.model }}</h3>
+      {% if usuario_actual %}
+        <p class="muted">{{ v.category }} · {{ v.year }}</p>
+        <p class="price">${{ "{:,.0f}".format(v.price) }}</p>
+        <p class="muted">{{ v.location }}{% if v.kilometers %} · {{ "{:,.0f}".format(v.kilometers) }} km{% endif %}</p>
+        {% if v.accepts_trade %}<span class="trade-tag">Acepta permuta</span>{% endif %}
+        <a class="text-link" href="{{ url_for('vehicle_detail', vehicle_id=v.id) }}">Ver publicación →</a>
+      {% else %}
+        <a class="text-link" href="{{ url_for('login', next=url_for('vehicle_detail', vehicle_id=v.id)) }}">Ingresá para ver los detalles</a>
+      {% endif %}
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+  <h3>Todavía no hay vehículos publicados</h3>
+  <p>Cuando alguien publique un vehículo, aparecerá automáticamente en este catálogo.</p>
+  {% if usuario_actual %}
+    <a class="button" href="{{ url_for('publish') }}">Publicar el primero</a>
+  {% else %}
+    <a class="button" href="{{ url_for('register') }}">Crear cuenta</a>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

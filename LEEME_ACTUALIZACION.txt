@@ -1,0 +1,36 @@
+ACTUALIZACION AUTOMATCH - REGISTRO E INICIO DE SESION
+
+ARCHIVOS INCLUIDOS:
+- app.py
+- templates/base.html
+- templates/index.html
+- templates/register.html
+- templates/login.html
+- templates/publish.html
+- templates/vehicle.html
+- static/style.css
+
+INSTALACION:
+1. Detener el servidor si estuviera iniciado (Ctrl+C).
+2. Extraer este ZIP dentro de:
+   D:\PROGRAMACION\PYTHON\AUTOMACH\automatch_v1
+3. Aceptar reemplazar los archivos incluidos.
+4. NO borrar ni reemplazar automatch.db ni la carpeta uploads.
+5. En PowerShell, desde la carpeta del proyecto, ejecutar: py app.py
+6. Abrir http://127.0.0.1:5000
+
+MIGRACION:
+Al iniciar, crea la tabla users y agrega user_id a vehicles si falta.
+Las publicaciones anteriores se conservan; su user_id queda vacío.
+
+ACCESOS:
+- Visitantes: ven solamente fotografía y nombre principal.
+- Usuarios con sesión iniciada: ven los detalles de los vehículos.
+- Para publicar hay que crear una cuenta e ingresar.
+- Las contraseñas se almacenan como hash.
+
+IMPORTANTE:
+Es una versión de desarrollo local. Antes de publicar en Internet se requiere
+configurar HTTPS, protección CSRF, límites de intentos de acceso, validación
+del contenido real de las imágenes y configuración de producción de Flask.
+No uses debug=True en un servidor público.

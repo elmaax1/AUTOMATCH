@@ -15,6 +15,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, abo
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
+from PIL import Image, UnidentifiedImageError
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
@@ -69,7 +70,7 @@ def get_s3_client():
 
 
 
-def upload_photo_to_storage(photo, filename):
+def upload_photo_to_storage(photo, filename, tipo_mime):
     bucket = os.environ["SUPABASE_STORAGE_BUCKET"]
     photo.stream.seek(0)
 
@@ -78,8 +79,17 @@ def upload_photo_to_storage(photo, filename):
         bucket,
         filename,
         ExtraArgs={
-            "ContentType": photo.mimetype or "application/octet-stream"
+            "ContentType": tipo_mime
         },
+    )
+
+
+def delete_photo_from_storage(filename):
+    bucket = os.environ["SUPABASE_STORAGE_BUCKET"]
+
+    get_s3_client().delete_object(
+        Bucket=bucket,
+        Key=filename
     )
 
 
@@ -129,6 +139,48 @@ def login_required(view):
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def validar_fotografia(photo, filename):
+    if not filename or not allowed_file(filename):
+        return None
+
+    formatos = {
+        "jpg": ("JPEG", "image/jpeg"),
+        "jpeg": ("JPEG", "image/jpeg"),
+        "png": ("PNG", "image/png"),
+        "webp": ("WEBP", "image/webp"),
+    }
+
+    extension = filename.rsplit(".", 1)[1].lower()
+    formato_esperado, tipo_mime = formatos[extension]
+
+    try:
+        import warnings
+
+        photo.stream.seek(0)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+
+            with Image.open(photo.stream) as imagen:
+                if imagen.format != formato_esperado:
+                    return None
+                imagen.verify()
+
+        return tipo_mime
+
+    except (
+        UnidentifiedImageError,
+        OSError,
+        ValueError,
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+    ):
+        return None
+
+    finally:
+        photo.stream.seek(0)
 
 
 @app.route("/")
@@ -296,39 +348,78 @@ def publish():
             flash("Revisá el año, el precio y los kilómetros.", "error")
             return redirect(url_for("publish"))
 
-        accepts_trade = 1 if request.form.get("accepts_trade") == "on" else 0
-        with get_db() as db:
-            cursor = db.execute("""
-                INSERT INTO vehicles
-                (category, brand, model, year, kilometers, price, location,
-                 description, contact_name, whatsapp, email, accepts_trade,
-                 trade_details, user_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
-            """, (
-                request.form["category"].strip(),
-                request.form["brand"].strip(),
-                request.form["model"].strip(),
-                year, kilometers, price,
-                request.form["location"].strip(),
-                request.form.get("description", "").strip(),
-                request.form["contact_name"].strip(),
-                request.form["whatsapp"].strip(),
-                request.form.get("email", "").strip(),
-                accepts_trade,
-                request.form.get("trade_details", "").strip(),
-                session["user_id"]
-            ))
-            vehicle_id = cursor.fetchone()["id"]
+        fotografias = []
 
-            for photo in request.files.getlist("photos"):
-                if photo and photo.filename and allowed_file(photo.filename):
+        for photo in request.files.getlist("photos"):
+            if photo and photo.filename:
+                tipo_mime = validar_fotografia(photo, photo.filename)
+
+                if not tipo_mime:
+                    flash(
+                        "Una o mas fotografias no son validas. "
+                        "Usa imagenes JPG, PNG o WEBP autenticas.",
+                        "error"
+                    )
+                    return redirect(url_for("publish"))
+
+                fotografias.append((photo, tipo_mime))
+
+        accepts_trade = 1 if request.form.get("accepts_trade") == "on" else 0
+        archivos_subidos = []
+
+        try:
+            with get_db() as db:
+                cursor = db.execute("""
+                    INSERT INTO vehicles
+                    (category, brand, model, year, kilometers, price, location,
+                     description, contact_name, whatsapp, email, accepts_trade,
+                     trade_details, user_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                """, (
+                    request.form["category"].strip(),
+                    request.form["brand"].strip(),
+                    request.form["model"].strip(),
+                    year, kilometers, price,
+                    request.form["location"].strip(),
+                    request.form.get("description", "").strip(),
+                    request.form["contact_name"].strip(),
+                    request.form["whatsapp"].strip(),
+                    request.form.get("email", "").strip(),
+                    accepts_trade,
+                    request.form.get("trade_details", "").strip(),
+                    session["user_id"]
+                ))
+                vehicle_id = cursor.fetchone()["id"]
+
+                for photo, tipo_mime in fotografias:
                     extension = photo.filename.rsplit(".", 1)[1].lower()
                     filename = secure_filename(f"{uuid4().hex}.{extension}")
-                    upload_photo_to_storage(photo, filename)
+
+                    archivos_subidos.append(filename)
+                    upload_photo_to_storage(photo, filename, tipo_mime)
+
                     db.execute(
                         "INSERT INTO vehicle_photos (vehicle_id, filename) VALUES (%s, %s)",
                         (vehicle_id, filename)
                     )
+
+        except Exception:
+            app.logger.exception("Error al publicar vehiculo o subir fotografias.")
+
+            for filename in archivos_subidos:
+                try:
+                    delete_photo_from_storage(filename)
+                except Exception:
+                    app.logger.exception(
+                        "No se pudo eliminar la fotografia %s de Supabase.",
+                        filename
+                    )
+
+            flash(
+                "No se pudo completar la publicacion. Intenta nuevamente.",
+                "error"
+            )
+            return redirect(url_for("publish"))
 
         flash("¡Tu vehículo ya está publicado en AUTOMATCH!", "success")
         return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id))

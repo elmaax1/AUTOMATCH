@@ -7,6 +7,27 @@
   <p class="muted">Completá los datos para que los compradores puedan encontrarlo.</p>
   <form method="post" enctype="multipart/form-data" class="form-card">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <section class="full" style="margin-bottom:24px;">
+      <h2>1. Fotos de tu vehiculo</h2>
+      <p class="muted">Primero subi las fotos de tu vehiculo. Podes sacar una foto ahora o elegir varias de tu galeria.</p>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:15px;">
+        <label class="form-card">
+          <strong>Abrir camara</strong>
+          <span class="muted">Sacar una foto ahora</span>
+          <input name="photos" type="file" accept="image/*" capture="environment">
+        </label>
+        <label class="form-card">
+          <strong>Elegir de la galeria</strong>
+          <span class="muted">Podes seleccionar varias fotos</span>
+          <input name="photos" type="file" accept=".jpg,.jpeg,.png,.webp" multiple>
+        </label>
+      </div>
+      <div id="photo-preview" style="display:none; margin-top:18px;">
+        <h3>Fotos seleccionadas</h3>
+        <p id="photo-count" class="muted"></p>
+        <div id="photo-list" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:12px;"></div>
+      </div>
+    </section>
     <div class="form-grid">
       <label>Tipo de vehículo *
         <select name="category" required>
@@ -26,7 +47,6 @@
         <input name="neighborhood" placeholder="Ej. Villa Belgrano, Nueva Córdoba, Centro">
       </label>
       <label class="full">Descripción<textarea name="description" rows="4" placeholder="Estado, equipamiento, detalles..."></textarea></label>
-      <label class="full">Fotografías (JPG, PNG o WEBP)<input name="photos" type="file" accept=".jpg,.jpeg,.png,.webp" multiple></label>
     </div>
     <h2>Datos de contacto</h2>
     <div class="form-grid">
@@ -42,4 +62,56 @@
     <p class="tiny">Las fotografías son opcionales por ahora. No publiques información sensible.</p>
   </form>
 </div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const inputs = document.querySelectorAll('input[name="photos"]');
+  const preview = document.getElementById("photo-preview");
+  const list = document.getElementById("photo-list");
+  const count = document.getElementById("photo-count");
+  let urls = [];
+
+  function mostrarFotos() {
+    urls.forEach(url => URL.revokeObjectURL(url));
+    urls = [];
+    list.replaceChildren();
+
+    const fotos = [];
+    inputs.forEach(input => {
+      Array.from(input.files || []).forEach(file => {
+        if (file.type.startsWith("image/")) fotos.push(file);
+      });
+    });
+
+    preview.style.display = fotos.length ? "block" : "none";
+    count.textContent = fotos.length +
+      (fotos.length === 1 ? " foto seleccionada" : " fotos seleccionadas");
+
+    fotos.forEach(file => {
+      const tarjeta = document.createElement("div");
+      const imagen = document.createElement("img");
+      const nombre = document.createElement("p");
+      const url = URL.createObjectURL(file);
+      urls.push(url);
+
+      imagen.src = url;
+      imagen.alt = "Vista previa de " + file.name;
+      imagen.style.width = "100%";
+      imagen.style.height = "110px";
+      imagen.style.objectFit = "cover";
+      imagen.style.borderRadius = "8px";
+
+      nombre.textContent = file.name;
+      nombre.style.fontSize = "12px";
+      nombre.style.overflowWrap = "anywhere";
+
+      tarjeta.append(imagen, nombre);
+      list.appendChild(tarjeta);
+    });
+  }
+
+  inputs.forEach(input => input.addEventListener("change", mostrarFotos));
+});
+</script>
+
 {% endblock %}

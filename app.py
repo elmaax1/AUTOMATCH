@@ -186,8 +186,39 @@ def validar_fotografia(photo, filename):
         photo.stream.seek(0)
 
 
+
+_visit_table_ready = False
+
+def registrar_visita():
+    global _visit_table_ready
+
+    with get_db() as db:
+        if not _visit_table_ready:
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS site_visits (
+                    id BIGSERIAL PRIMARY KEY,
+                    visited_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            _visit_table_ready = True
+
+        user_id = session.get("user_id")
+        if user_id:
+            user = db.execute(
+                "SELECT role FROM users WHERE id = %s",
+                (user_id,)
+            ).fetchone()
+            if user and user["role"] == "admin":
+                return
+
+        db.execute("INSERT INTO site_visits DEFAULT VALUES")
+
+
+
+
 @app.route("/")
 def index():
+    registrar_visita()
     query = request.args.get("q", "").strip()
     category = request.args.get("category", "").strip()
     max_price = request.args.get("max_price", "").strip()
@@ -1217,6 +1248,8 @@ def admin_dashboard():
     if not verificar_usuario or verificar_usuario["role"] != "admin":
         abort(403)
 
+    registrar_visita()
+
     if not session.get("admin_csrf_token"):
         session["admin_csrf_token"] = secrets.token_urlsafe(32)
 
@@ -1236,6 +1269,34 @@ def admin_dashboard():
         featured_vehicles = db.execute(
             "SELECT COUNT(*) AS count FROM vehicles WHERE featured = 1"
         ).fetchone()["count"]
+        total_visits = db.execute(
+            "SELECT COUNT(*) AS count FROM site_visits"
+        ).fetchone()["count"]
+
+        today_visits = db.execute("""
+            SELECT COUNT(*) AS count
+            FROM site_visits
+            WHERE (visited_at AT TIME ZONE 'America/Argentina/Cordoba')::date =
+                  (CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Cordoba')::date
+        """).fetchone()["count"]
+
+        last_7_days_visits = db.execute("""
+            SELECT COUNT(*) AS count
+            FROM site_visits
+            WHERE (visited_at AT TIME ZONE 'America/Argentina/Cordoba')::date >=
+                  (CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Cordoba')::date - 6
+        """).fetchone()["count"]
+
+        visits_by_day = db.execute("""
+            SELECT
+                (visited_at AT TIME ZONE 'America/Argentina/Cordoba')::date AS day,
+                COUNT(*) AS visits
+            FROM site_visits
+            WHERE (visited_at AT TIME ZONE 'America/Argentina/Cordoba')::date >=
+                  (CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Cordoba')::date - 6
+            GROUP BY day
+            ORDER BY day DESC
+        """).fetchall()
 
         users = db.execute("""
             SELECT id, name, email, phone, created_at
@@ -1269,6 +1330,10 @@ def admin_dashboard():
         total_vehicles=total_vehicles,
         published_vehicles=published_vehicles,
         featured_vehicles=featured_vehicles,
+        total_visits=total_visits,
+        today_visits=today_visits,
+        last_7_days_visits=last_7_days_visits,
+        visits_by_day=visits_by_day,
         users=users,
         vehicles=vehicles,
         csrf_token=session["admin_csrf_token"]

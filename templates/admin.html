@@ -39,6 +39,50 @@
     </div>
 
     <section class="form-card" style="margin-top:30px;">
+        <h2>Visitas de la página</h2>
+        <p class="muted">Cada carga de la página principal cuenta como una visita. Se incluyen visitas repetidas y se excluyen las del administrador.</p>
+
+        <div class="grid" style="margin-top:20px;">
+            <article class="vehicle-card"><div class="card-body">
+                <p class="muted">Visitas totales</p>
+                <h2>{{ total_visits }}</h2>
+            </div></article>
+
+            <article class="vehicle-card"><div class="card-body">
+                <p class="muted">Visitas de hoy</p>
+                <h2>{{ today_visits }}</h2>
+            </div></article>
+
+            <article class="vehicle-card"><div class="card-body">
+                <p class="muted">últimos 7 días</p>
+                <h2>{{ last_7_days_visits }}</h2>
+            </div></article>
+        </div>
+
+        <h3 style="margin-top:24px;">Actividad diaria (últimos 7 días)</h3>
+        <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse;">
+                <thead>
+                    <tr>
+                        <th style="text-align:left; padding:10px;">Fecha</th>
+                        <th style="text-align:left; padding:10px;">Visitas</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in visits_by_day %}
+                    <tr>
+                        <td style="padding:10px;">{{ item.day }}</td>
+                        <td style="padding:10px;">{{ item.visits }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="2" style="padding:10px;">Todavía no hay visitas registradas.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="form-card" style="margin-top:30px;">
         <h2>Usuarios registrados</h2>
         <p class="muted">Se muestran hasta los ?ltimos 100 usuarios.</p>
 

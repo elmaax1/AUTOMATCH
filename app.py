@@ -232,7 +232,7 @@ def index():
 
     # Visitantes: la consulta obtiene los datos publicos de los vehiculos.
     sql = """
-        SELECT v.id, v.brand, v.model, v.neighborhood,
+        SELECT v.id, v.brand, v.model, v.neighborhood, v.price,
         CASE WHEN v.featured = 1 AND v.featured_until IS NOT NULL
              AND v.featured_until > CURRENT_TIMESTAMP
              THEN 1 ELSE 0 END AS is_featured_active,

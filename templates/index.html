@@ -73,13 +73,13 @@
           {% endif %}
           <div class="card-body public-card-body">
             <h3>{{ v.brand }} {{ v.model }}</h3>
+            <p class="price">${{ "{:,.0f}".format(v.price) }}</p>
             {% if v.neighborhood %}
               <p class="muted">📍 Barrio: {{ v.neighborhood }}</p>
             {% endif %}
 
             {% if usuario_actual %}
               <p class="muted">{{ v.category }} · {{ v.year }}</p>
-              <p class="price">${{ "{:,.0f}".format(v.price) }}</p>
               <p class="muted">
                 {{ v.location }}
                 {% if v.kilometers %} · {{ "{:,.0f}".format(v.kilometers) }} km{% endif %}

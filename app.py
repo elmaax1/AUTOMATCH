@@ -199,7 +199,7 @@ def index():
                  AND v.featured_until > CURRENT_TIMESTAMP
                  THEN 1 ELSE 0 END AS is_featured_active,
             (SELECT filename FROM vehicle_photos p
-             WHERE p.vehicle_id = v.id ORDER BY p.id LIMIT 1) AS photo,
+             WHERE p.vehicle_id = v.id ORDER BY p.is_cover DESC, p.id LIMIT 1) AS photo,
             EXISTS (
                 SELECT 1 FROM favorites f
                 WHERE f.vehicle_id = v.id
@@ -237,7 +237,7 @@ def index():
              AND v.featured_until > CURRENT_TIMESTAMP
              THEN 1 ELSE 0 END AS is_featured_active,
         (SELECT filename FROM vehicle_photos p
-             WHERE p.vehicle_id = v.id ORDER BY p.id LIMIT 1) AS photo
+             WHERE p.vehicle_id = v.id ORDER BY p.is_cover DESC, p.id LIMIT 1) AS photo
         FROM vehicles v
         WHERE v.status = 'published'
     """
@@ -324,7 +324,7 @@ def favorites():
                      THEN 1 ELSE 0 END AS is_featured_active,
                 (SELECT filename FROM vehicle_photos p
                  WHERE p.vehicle_id = v.id
-                 ORDER BY p.id LIMIT 1) AS photo
+                 ORDER BY p.is_cover DESC, p.id LIMIT 1) AS photo
             FROM favorites f
             JOIN vehicles v ON v.id = f.vehicle_id
             WHERE f.user_id = %s
@@ -465,7 +465,7 @@ def publish():
                 ))
                 vehicle_id = cursor.fetchone()["id"]
 
-                for photo, tipo_mime in fotografias:
+                for indice, (photo, tipo_mime) in enumerate(fotografias):
                     extension = photo.filename.rsplit(".", 1)[1].lower()
                     filename = secure_filename(f"{uuid4().hex}.{extension}")
 
@@ -473,8 +473,10 @@ def publish():
                     upload_photo_to_storage(photo, filename, tipo_mime)
 
                     db.execute(
-                        "INSERT INTO vehicle_photos (vehicle_id, filename) VALUES (%s, %s)",
-                        (vehicle_id, filename)
+                        """INSERT INTO vehicle_photos
+                           (vehicle_id, filename, is_cover)
+                           VALUES (%s, %s, %s)""",
+                        (vehicle_id, filename, indice == 0)
                     )
 
         except Exception:
@@ -565,6 +567,15 @@ def vehicle_edit(vehicle_id):
 
                 fotografias.append((photo, original_name, tipo_mime))
 
+        cover_value = request.form.get("cover_photo_id", "").strip()
+        try:
+            selected_cover_id = int(cover_value) if cover_value else None
+            if selected_cover_id is not None and selected_cover_id <= 0:
+                raise ValueError
+        except ValueError:
+            flash("La foto de portada seleccionada no es válida.", "error")
+            return redirect(url_for("vehicle_edit", vehicle_id=vehicle_id))
+
         try:
             remove_ids = set()
 
@@ -586,6 +597,20 @@ def vehicle_edit(vehicle_id):
 
             try:
                 with get_db() as db:
+                    if selected_cover_id is not None:
+                        selected_photo = db.execute("""
+                            SELECT id
+                            FROM vehicle_photos
+                            WHERE id = %s AND vehicle_id = %s
+                        """, (selected_cover_id, vehicle_id)).fetchone()
+
+                        if not selected_photo:
+                            flash("La foto de portada no pertenece a esta publicación.", "error")
+                            return redirect(url_for("vehicle_edit", vehicle_id=vehicle_id))
+
+                        if selected_cover_id in remove_ids:
+                            selected_cover_id = None
+
                     db.execute("""
                         UPDATE vehicles SET
                             category = %s,
@@ -648,9 +673,52 @@ def vehicle_edit(vehicle_id):
                         )
 
                         db.execute("""
-                            INSERT INTO vehicle_photos (vehicle_id, filename)
-                            VALUES (%s, %s)
+                            INSERT INTO vehicle_photos
+                                (vehicle_id, filename, is_cover)
+                            VALUES (%s, %s, FALSE)
                         """, (vehicle_id, filename))
+
+                    if selected_cover_id is not None:
+                        db.execute("""
+                            UPDATE vehicle_photos
+                            SET is_cover = FALSE
+                            WHERE vehicle_id = %s
+                        """, (vehicle_id,))
+
+                        db.execute("""
+                            UPDATE vehicle_photos
+                            SET is_cover = TRUE
+                            WHERE id = %s AND vehicle_id = %s
+                        """, (selected_cover_id, vehicle_id))
+                    else:
+                        portada_actual = db.execute("""
+                            SELECT id
+                            FROM vehicle_photos
+                            WHERE vehicle_id = %s AND is_cover = TRUE
+                            LIMIT 1
+                        """, (vehicle_id,)).fetchone()
+
+                        if not portada_actual:
+                            primera_foto = db.execute("""
+                                SELECT id
+                                FROM vehicle_photos
+                                WHERE vehicle_id = %s
+                                ORDER BY id
+                                LIMIT 1
+                            """, (vehicle_id,)).fetchone()
+
+                            if primera_foto:
+                                db.execute("""
+                                    UPDATE vehicle_photos
+                                    SET is_cover = FALSE
+                                    WHERE vehicle_id = %s
+                                """, (vehicle_id,))
+
+                                db.execute("""
+                                    UPDATE vehicle_photos
+                                    SET is_cover = TRUE
+                                    WHERE id = %s AND vehicle_id = %s
+                                """, (primera_foto["id"], vehicle_id))
 
             except Exception:
                 for filename in archivos_subidos:
@@ -699,10 +767,10 @@ def vehicle_edit(vehicle_id):
 
     with get_db() as db:
         photos = db.execute("""
-            SELECT id, filename
+            SELECT id, filename, is_cover
             FROM vehicle_photos
             WHERE vehicle_id = %s
-            ORDER BY id
+            ORDER BY is_cover DESC, id
         """, (vehicle_id,)).fetchall()
 
     return render_template(
@@ -1037,7 +1105,9 @@ def vehicle_detail(vehicle_id):
         ).fetchone() is not None
 
         photos = db.execute(
-            "SELECT filename FROM vehicle_photos WHERE vehicle_id = %s",
+            """SELECT filename FROM vehicle_photos
+               WHERE vehicle_id = %s
+               ORDER BY is_cover DESC, id""",
             (vehicle_id,)
         ).fetchall()
     if not session.get("feature_csrf_token"):
@@ -1184,7 +1254,7 @@ def admin_dashboard():
                     SELECT filename
                     FROM vehicle_photos p
                     WHERE p.vehicle_id = v.id
-                    ORDER BY p.id
+                    ORDER BY p.is_cover DESC, p.id
                     LIMIT 1
                 ) AS photo
             FROM vehicles v

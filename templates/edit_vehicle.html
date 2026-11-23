@@ -60,6 +60,13 @@
         {% for photo in photos %}
         <div class="photo-edit-item">
           <img src="{{ url_for('uploaded_file', filename=photo.filename) }}" alt="Fotografía del vehículo">
+
+          <label>
+            <input type="radio" name="cover_photo_id" value="{{ photo.id }}"
+                   {% if photo.is_cover %}checked{% endif %}>
+            {% if photo.is_cover %}Portada actual{% else %}Usar como portada{% endif %}
+          </label>
+
           <label>
             <input type="checkbox" name="remove_photo_ids" value="{{ photo.id }}">
             Quitar esta foto

@@ -4,6 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#173b70">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="AUTOMATCHCBA">
+  <meta property="og:title" content="{% block og_title %}AUTOMATCHCBA | Encontrá tu próximo vehículo{% endblock %}">
+  <meta property="og:description" content="{% block og_description %}Encontrá y publicá vehículos en AUTOMATCHCBA. Tu próximo vehículo puede estar acá.{% endblock %}">
+  <meta property="og:url" content="{{ url_for('index', _external=True, _scheme='https') }}">
+  <meta property="og:image" content="{{ url_for('static', filename='icono-automatchcba.png', _external=True, _scheme='https') }}">
+  <meta property="og:image:type" content="image/png">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="{% block twitter_title %}AUTOMATCHCBA | Encontrá tu próximo vehículo{% endblock %}">
+  <meta name="twitter:description" content="{% block twitter_description %}Encontrá y publicá vehículos en AUTOMATCHCBA.{% endblock %}">
+  <meta name="twitter:image" content="{{ url_for('static', filename='icono-automatchcba.png', _external=True, _scheme='https') }}">
   <title>{% block title %}AUTOMATCHCBA{% endblock %}</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='icono-automatchcba.png') }}">
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">

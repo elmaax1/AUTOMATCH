@@ -40,6 +40,7 @@
     <div class="grid">
       {% for v in vehicles %}
         <article class="vehicle-card">
+          <div class="photo-container">
           {% if usuario_actual %}
             <a href="{{ url_for('vehicle_detail', vehicle_id=v.id) }}" class="photo-wrap">
           {% else %}
@@ -57,6 +58,10 @@
               <div class="no-photo">Sin fotografía</div>
             {% endif %}
           </a>
+          <a class="share-button" target="_blank" rel="noopener"
+             href="https://wa.me/?text={{ ('Mira este vehiculo: ' ~ v.brand ~ ' ' ~ v.model ~ ' - $' ~ ('{:,.0f}'.format(v.price)) ~ ' ' ~ url_for('share_vehicle', vehicle_id=v.id, _external=True, _scheme='https'))|urlencode }}"
+             aria-label="Compartir {{ v.brand }} {{ v.model }} por WhatsApp">&#8599;</a>
+          </div>
 
           {% if usuario_actual %}
             <form method="POST"

@@ -287,6 +287,41 @@ def index():
 
 
 
+@app.route("/compartir/vehiculo/<int:vehicle_id>")
+def share_vehicle(vehicle_id):
+    with get_db() as db:
+        vehicle = db.execute(
+            """
+            SELECT v.id, v.brand, v.model, v.price,
+                   (SELECT filename FROM vehicle_photos p
+                    WHERE p.vehicle_id = v.id
+                    ORDER BY p.is_cover DESC, p.id LIMIT 1) AS photo
+            FROM vehicles v
+            WHERE v.id = %s AND v.status = 'published'
+            """,
+            (vehicle_id,)
+        ).fetchone()
+
+    if vehicle is None:
+        abort(404)
+
+    if vehicle["photo"]:
+        image_url = get_public_photo_url(vehicle["photo"])
+    else:
+        image_url = url_for(
+            "static",
+            filename="icono-automatchcba-preview.jpg",
+            _external=True,
+            _scheme="https"
+        )
+
+    return render_template(
+        "share_vehicle.html",
+        vehicle=vehicle,
+        image_url=image_url
+    )
+
+
 
 def get_form_csrf_token():
     token = session.get("form_csrf_token")

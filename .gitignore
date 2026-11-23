@@ -20,3 +20,10 @@ app_con_error_*.py
 .gitignore.respaldo_*
 *.sqlite3
 automatch_secret_render.txt
+
+# Respaldos locales: nunca subir a GitHub
+*.bak
+*.backup
+*.backup_*
+app.py.backup_*
+ruta_edicion_propietario.txt

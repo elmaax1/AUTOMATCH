@@ -18,17 +18,30 @@
     <p class="eyebrow">{{ vehicle.category }} · {{ vehicle.year }}</p>
     <h1>{{ vehicle.brand }} {{ vehicle.model }}</h1>
     <p class="price large">${{ "{:,.0f}".format(vehicle.price) }}</p>
+
+    <form method="POST" action="{{ url_for('toggle_favorite', vehicle_id=vehicle.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="{{ url_for('vehicle_detail', vehicle_id=vehicle.id) }}">
+      <button class="button" type="submit">
+        {% if is_favorite %}♥ Guardado en favoritos{% else %}♡ Guardar en favoritos{% endif %}
+      </button>
+    </form>
     <p>{{ vehicle.location }} · {{ "{:,.0f}".format(vehicle.kilometers or 0) }} km</p>
+
+    {% if vehicle.neighborhood %}
+    <p>Barrio: {{ vehicle.neighborhood }}</p>
+    {% endif %}
     {% if vehicle.accepts_trade %}<span class="trade-tag">Acepta permuta</span>{% endif %}
     <h3>Descripción</h3>
     <p>{{ vehicle.description or "El vendedor no agregó una descripción." }}</p>
     {% if usuario_actual and (usuario_actual.role == 'admin' or usuario_actual.id == vehicle.user_id) %}
+    <a class="button" href="{{ url_for('vehicle_edit', vehicle_id=vehicle.id) }}">Editar publicación</a>
     <div class="contact-box feature-box">
-      <h3>Destacar publicaci?n</h3>
-      <p>Eleg? cu?nto tiempo quer?s destacar este veh?culo en el cat?logo.</p>
+      <h3>Destacar publicación</h3>
+      <p>Elegí cuánto tiempo querés destacar este vehículo en el catálogo.</p>
       <form method="POST" action="{{ url_for('vehicle_feature_payment', vehicle_id=vehicle.id) }}">
         <input type="hidden" name="csrf_token" value="{{ feature_csrf_token }}">
-        <label for="plan_days">Duraci?n del destacado</label>
+        <label for="plan_days">Duración del destacado</label>
         <select id="plan_days" name="plan_days" required>
           <option value="7">7 d?as - $2.000</option>
           <option value="15">15 d?as - $4.000</option>
@@ -44,9 +57,9 @@
       <p>{{ vehicle.contact_name }}</p>
       <a class="button" target="_blank" rel="noopener" href="https://wa.me/{{ vehicle.whatsapp|replace('+','')|replace(' ','')|replace('-','') }}">Contactar por WhatsApp</a>
       {% if usuario_actual and (usuario_actual.role == 'admin' or usuario_actual.id == vehicle.user_id) %}
-      <form method="POST" action="{{ url_for('vehicle_delete', vehicle_id=vehicle.id) }}" onsubmit="return confirm('?Seguro que quer?s eliminar esta publicaci?n? Esta acci?n no se puede deshacer.');">
+      <form method="POST" action="{{ url_for('vehicle_delete', vehicle_id=vehicle.id) }}" onsubmit="return confirm('¿Seguro que querés eliminar esta publicación? Esta acción no se puede deshacer.');">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button class="button" type="submit">Eliminar publicaci?n</button>
+        <button class="button" type="submit">Eliminar publicación</button>
       </form>
       {% endif %}
     </div>

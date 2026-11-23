@@ -230,9 +230,9 @@ def index():
             selected_category=category, max_price=max_price
         )
 
-    # Visitantes: la consulta solo obtiene ID, nombre principal y fotografÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­a.
+    # Visitantes: la consulta obtiene los datos publicos de los vehiculos.
     sql = """
-        SELECT v.id, v.brand, v.model,
+        SELECT v.id, v.brand, v.model, v.neighborhood,
         CASE WHEN v.featured = 1 AND v.featured_until IS NOT NULL
              AND v.featured_until > CURRENT_TIMESTAMP
              THEN 1 ELSE 0 END AS is_featured_active,
@@ -304,6 +304,9 @@ def toggle_favorite(vehicle_id):
             )
             flash("Vehiculo guardado en favoritos.", "success")
 
+    destino = request.form.get("next", "")
+    if destino.startswith("/") and not destino.startswith("//"):
+        return redirect(destino)
     return redirect(url_for("index"))
 
 @app.route("/favoritos")
@@ -441,16 +444,17 @@ def publish():
             with get_db() as db:
                 cursor = db.execute("""
                     INSERT INTO vehicles
-                    (category, brand, model, year, kilometers, price, location,
+                    (category, brand, model, year, kilometers, price, location, neighborhood,
                      description, contact_name, whatsapp, email, accepts_trade,
                      trade_details, user_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
                 """, (
                     request.form["category"].strip(),
                     request.form["brand"].strip(),
                     request.form["model"].strip(),
                     year, kilometers, price,
                     request.form["location"].strip(),
+                    request.form.get("neighborhood", "").strip(),
                     request.form.get("description", "").strip(),
                     request.form["contact_name"].strip(),
                     request.form["whatsapp"].strip(),
@@ -495,6 +499,218 @@ def publish():
         return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id))
     return render_template("publish.html", csrf_token=get_form_csrf_token())
 
+
+@app.route("/vehiculo/<int:vehicle_id>/editar", methods=["GET", "POST"])
+@login_required
+def vehicle_edit(vehicle_id):
+    user = current_user()
+
+    if not user:
+        abort(403)
+
+    with get_db() as db:
+        vehicle = db.execute(
+            "SELECT * FROM vehicles WHERE id = %s",
+            (vehicle_id,)
+        ).fetchone()
+
+    if not vehicle:
+        abort(404)
+
+    if user["role"] != "admin" and vehicle["user_id"] != user["id"]:
+        abort(403)
+
+    if request.method == "POST":
+        verify_form_csrf()
+
+        required = [
+            "category", "brand", "model", "year", "price",
+            "location", "contact_name", "whatsapp"
+        ]
+
+        missing = [
+            field for field in required
+            if not request.form.get(field, "").strip()
+        ]
+
+        if missing:
+            flash("Completa todos los campos obligatorios.", "error")
+            return redirect(url_for("vehicle_edit", vehicle_id=vehicle_id))
+
+        try:
+            year = int(request.form["year"])
+            price = float(request.form["price"])
+            kilometers = int(request.form.get("kilometers") or 0)
+
+            if year < 1900 or year > 2100 or price <= 0 or kilometers < 0:
+                raise ValueError
+
+        except ValueError:
+            flash("Revisa el año, el precio y los kilómetros.", "error")
+            return redirect(url_for("vehicle_edit", vehicle_id=vehicle_id))
+
+        fotografias = []
+
+        for photo in request.files.getlist("photos"):
+            if photo and photo.filename:
+                original_name = photo.filename.replace("\\", "/").split("/")[-1]
+                tipo_mime = validar_fotografia(photo, original_name)
+
+                if not tipo_mime:
+                    flash(
+                        "Una fotografía no es válida. Usa imágenes JPG, PNG o WEBP.",
+                        "error"
+                    )
+                    return redirect(url_for("vehicle_edit", vehicle_id=vehicle_id))
+
+                fotografias.append((photo, original_name, tipo_mime))
+
+        try:
+            remove_ids = set()
+
+            for value in request.form.getlist("remove_photo_ids"):
+                try:
+                    photo_id = int(value)
+                except ValueError:
+                    abort(400)
+
+                if photo_id > 0:
+                    remove_ids.add(photo_id)
+
+            archivos_subidos = []
+            archivos_eliminados = []
+
+            accepts_trade = (
+                1 if request.form.get("accepts_trade") == "on" else 0
+            )
+
+            try:
+                with get_db() as db:
+                    db.execute("""
+                        UPDATE vehicles SET
+                            category = %s,
+                            brand = %s,
+                            model = %s,
+                            year = %s,
+                            kilometers = %s,
+                            price = %s,
+                            location = %s,
+                            neighborhood = %s,
+                            description = %s,
+                            contact_name = %s,
+                            whatsapp = %s,
+                            email = %s,
+                            accepts_trade = %s,
+                            trade_details = %s
+                        WHERE id = %s
+                    """, (
+                        request.form["category"].strip(),
+                        request.form["brand"].strip(),
+                        request.form["model"].strip(),
+                        year,
+                        kilometers,
+                        price,
+                        request.form["location"].strip(),
+                        request.form.get("neighborhood", "").strip(),
+                        request.form.get("description", "").strip(),
+                        request.form["contact_name"].strip(),
+                        request.form["whatsapp"].strip(),
+                        request.form.get("email", "").strip(),
+                        accepts_trade,
+                        request.form.get("trade_details", "").strip(),
+                        vehicle_id
+                    ))
+
+                    for photo_id in remove_ids:
+                        photo = db.execute("""
+                            SELECT filename
+                            FROM vehicle_photos
+                            WHERE id = %s AND vehicle_id = %s
+                        """, (photo_id, vehicle_id)).fetchone()
+
+                        if photo:
+                            db.execute(
+                                "DELETE FROM vehicle_photos WHERE id = %s AND vehicle_id = %s",
+                                (photo_id, vehicle_id)
+                            )
+                            archivos_eliminados.append(photo["filename"])
+
+                    for photo, original_name, tipo_mime in fotografias:
+                        extension = original_name.rsplit(".", 1)[1].lower()
+                        filename = secure_filename(
+                            f"{uuid4().hex}.{extension}"
+                        )
+
+                        archivos_subidos.append(filename)
+
+                        upload_photo_to_storage(
+                            photo, filename, tipo_mime
+                        )
+
+                        db.execute("""
+                            INSERT INTO vehicle_photos (vehicle_id, filename)
+                            VALUES (%s, %s)
+                        """, (vehicle_id, filename))
+
+            except Exception:
+                for filename in archivos_subidos:
+                    try:
+                        delete_photo_from_storage(filename)
+                    except Exception:
+                        app.logger.exception(
+                            "No se pudo limpiar la foto nueva %s.",
+                            filename
+                        )
+                raise
+
+            for filename in archivos_eliminados:
+                if not filename or Path(filename).name != filename:
+                    continue
+
+                with get_db() as db:
+                    references = db.execute("""
+                        SELECT COUNT(*) AS count
+                        FROM vehicle_photos
+                        WHERE filename = %s
+                    """, (filename,)).fetchone()["count"]
+
+                if references == 0:
+                    try:
+                        delete_photo_from_storage(filename)
+                    except Exception:
+                        app.logger.exception(
+                            "No se pudo eliminar la foto %s de Supabase.",
+                            filename
+                        )
+
+        except Exception:
+            app.logger.exception(
+                "Error al editar el vehículo %s.",
+                vehicle_id
+            )
+            flash(
+                "No se pudo completar la edición. Intenta nuevamente.",
+                "error"
+            )
+            return redirect(url_for("vehicle_edit", vehicle_id=vehicle_id))
+
+        flash("Publicación actualizada correctamente.", "success")
+        return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id))
+
+    with get_db() as db:
+        photos = db.execute("""
+            SELECT id, filename
+            FROM vehicle_photos
+            WHERE vehicle_id = %s
+            ORDER BY id
+        """, (vehicle_id,)).fetchall()
+
+    return render_template(
+        "edit_vehicle.html",
+        vehicle=vehicle,
+        photos=photos,
+        csrf_token=get_form_csrf_token()
+    )
 
 @app.route("/uploads/<path:filename>")
 def uploaded_file(filename):
@@ -814,6 +1030,12 @@ def vehicle_detail(vehicle_id):
         ).fetchone()
         if vehicle is None:
             abort(404)
+
+        is_favorite = db.execute(
+            "SELECT 1 FROM favorites WHERE user_id = %s AND vehicle_id = %s",
+            (session.get("user_id"), vehicle_id)
+        ).fetchone() is not None
+
         photos = db.execute(
             "SELECT filename FROM vehicle_photos WHERE vehicle_id = %s",
             (vehicle_id,)
@@ -825,6 +1047,7 @@ def vehicle_detail(vehicle_id):
         "vehicle.html",
         vehicle=vehicle,
         photos=photos,
+        is_favorite=is_favorite,
         feature_csrf_token=session["feature_csrf_token"],
         csrf_token=get_form_csrf_token()
     )
@@ -1030,6 +1253,7 @@ def admin_vehicle_edit(vehicle_id):
                     kilometers = %s,
                     price = %s,
                     location = %s,
+                    neighborhood = %s,
                     description = %s,
                     contact_name = %s,
                     whatsapp = %s,
@@ -1045,6 +1269,7 @@ def admin_vehicle_edit(vehicle_id):
                 kilometers,
                 price,
                 request.form["location"].strip(),
+                request.form.get("neighborhood", "").strip(),
                 request.form.get("description", "").strip(),
                 request.form["contact_name"].strip(),
                 request.form["whatsapp"].strip(),
@@ -1137,7 +1362,7 @@ def admin_vehicle_delete(vehicle_id):
             (vehicle_id,)
         )
 
-    # Los archivos se eliminan solamente despuÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â©s de borrar los registros.
+    # Los archivos se eliminan solamente despues de borrar los registros.
     for filename in filenames:
         if not filename or Path(filename).name != filename:
             continue

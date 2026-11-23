@@ -24,34 +24,11 @@
   </div>
 </section>
 
-<section class="search-panel search-home">
-  <div class="search-title">
-    <p class="eyebrow">BUSCADOR</p>
-    <h2>¿Qué vehículo estás buscando?</h2>
-  </div>
 
-  <form method="get" class="search-form">
-    <input name="q" value="{{ query }}" placeholder="Marca o modelo">
-
-    {% if usuario_actual %}
-      <select name="category">
-        <option value="">Todos los vehículos</option>
-        {% for item in ["Auto", "Moto", "Camioneta", "Utilitario", "Camión", "Otro"] %}
-          <option value="{{ item }}" {% if selected_category == item %}selected{% endif %}>{{ item }}</option>
-        {% endfor %}
-      </select>
-
-      <input name="max_price" type="number" min="1" step="any"
-             value="{{ max_price }}" placeholder="Precio máximo">
-    {% endif %}
-
-    <button class="button" type="submit">Buscar vehículos</button>
-  </form>
-</section>
 
 <section class="catalog-section">
   <div class="section-heading">
-    <div>
+    <div class="catalog-heading-text">
       <p class="eyebrow">NUESTRO CATÁLOGO</p>
       <h2>Vehículos publicados</h2>
       <p class="muted">Descubrí las oportunidades disponibles.</p>
@@ -96,6 +73,9 @@
           {% endif %}
           <div class="card-body public-card-body">
             <h3>{{ v.brand }} {{ v.model }}</h3>
+            {% if v.neighborhood %}
+              <p class="muted">📍 Barrio: {{ v.neighborhood }}</p>
+            {% endif %}
 
             {% if usuario_actual %}
               <p class="muted">{{ v.category }} · {{ v.year }}</p>
@@ -135,6 +115,31 @@
       {% endif %}
     </div>
   {% endif %}
+</section>
+
+<section class="search-panel search-home">
+  <div class="search-title">
+    <p class="eyebrow">BUSCADOR</p>
+    <h2>¿Qué vehículo estás buscando?</h2>
+  </div>
+
+  <form method="get" class="search-form">
+    <input name="q" value="{{ query }}" placeholder="Marca o modelo">
+
+    {% if usuario_actual %}
+      <select name="category">
+        <option value="">Todos los vehículos</option>
+        {% for item in ["Auto", "Moto", "Camioneta", "Utilitario", "Camión", "Otro"] %}
+          <option value="{{ item }}" {% if selected_category == item %}selected{% endif %}>{{ item }}</option>
+        {% endfor %}
+      </select>
+
+      <input name="max_price" type="number" min="1" step="any"
+             value="{{ max_price }}" placeholder="Precio máximo">
+    {% endif %}
+
+    <button class="button" type="submit">Buscar vehículos</button>
+  </form>
 </section>
 
 {% endblock %}

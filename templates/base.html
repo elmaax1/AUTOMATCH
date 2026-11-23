@@ -3,7 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#173b70">
   <title>{% block title %}AUTOMATCHCBA{% endblock %}</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='icono-automatchcba.png') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -35,6 +38,6 @@
   {% endwith %}
   {% block content %}{% endblock %}
 </main>
-<footer>AUTOMATCHCBA · Encontrá tu próximo vehículo</footer>
+  <footer>AUTOMATCHCBA · Encontrá tu próximo vehículo</footer>
 </body>
 </html>

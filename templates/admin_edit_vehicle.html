@@ -1,20 +1,20 @@
 {% extends "base.html" %}
 
-{% block title %}Editar veh?culo | AUTOMATCH{% endblock %}
+{% block title %}Editar vehículo | AUTOMATCH{% endblock %}
 
 {% block content %}
 <div class="form-page">
-    <p class="eyebrow">ADMINISTRACI?N</p>
-    <h1>Editar veh?culo</h1>
-    <p class="muted">Modific? los datos de esta publicaci?n.</p>
+    <p class="eyebrow">ADMINISTRACIÓN</p>
+    <h1>Editar vehículo</h1>
+    <p class="muted">Modificá los datos de esta publicación.</p>
 
     <form method="POST" class="form-card">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
         <div class="form-grid">
-            <label>Tipo de veh?culo *
+            <label>Tipo de vehículo *
                 <select name="category" required>
-                    {% for item in ["Auto", "Moto", "Camioneta", "Utilitario", "Cami?n", "Otro"] %}
+                    {% for item in ["Auto", "Moto", "Camioneta", "Utilitario", "Camión", "Otro"] %}
                     <option value="{{ item }}" {% if vehicle.category == item %}selected{% endif %}>{{ item }}</option>
                     {% endfor %}
                 </select>
@@ -28,11 +28,11 @@
                 <input name="model" value="{{ vehicle.model }}" required>
             </label>
 
-            <label>A?o *
+            <label>Año *
                 <input name="year" type="number" min="1900" max="2100" value="{{ vehicle.year }}" required>
             </label>
 
-            <label>Kil?metros
+            <label>Kilómetros
                 <input name="kilometers" type="number" min="0" value="{{ vehicle.kilometers or 0 }}">
             </label>
 
@@ -44,7 +44,11 @@
                 <input name="location" value="{{ vehicle.location }}" required>
             </label>
 
-            <label class="full">Descripci?n
+            <label class="full">Barrio donde se puede ver el vehículo
+                <input name="neighborhood" value="{{ vehicle.neighborhood or '' }}" placeholder="Ej. Villa Belgrano, Nueva Córdoba, Centro">
+            </label>
+
+            <label class="full">Descripción
                 <textarea name="description" rows="4">{{ vehicle.description or "" }}</textarea>
             </label>
         </div>
@@ -60,7 +64,7 @@
                 <input name="whatsapp" value="{{ vehicle.whatsapp }}" required>
             </label>
 
-            <label class="full">Correo electr?nico
+            <label class="full">Correo electrónico
                 <input name="email" type="email" value="{{ vehicle.email or '' }}">
             </label>
         </div>
@@ -70,7 +74,7 @@
             Acepta permutas
         </label>
 
-        <label>?Qu? veh?culo le interesa recibir?
+        <label>¿Qué vehículo le interesa recibir?
             <input name="trade_details" value="{{ vehicle.trade_details or '' }}">
         </label>
 

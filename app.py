@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import timedelta
 import os
 import boto3
 import secrets
@@ -30,6 +31,7 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=os.getenv("AUTOMATCH_HTTPS", "0") == "1",
 )
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_DIR)
 
@@ -488,6 +490,7 @@ def login():
         if user and check_password_hash(user["password_hash"], password):
             session.clear()
             session["user_id"] = user["id"]
+            session.permanent = request.form.get("remember_me") == "on"
             destination = request.args.get("next", "")
             if not destination.startswith("/") or destination.startswith("//"):
                 destination = url_for("index")

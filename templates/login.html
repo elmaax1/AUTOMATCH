@@ -13,6 +13,10 @@
     <label>Contraseña *
       <input name="password" type="password" required autocomplete="current-password">
     </label>
+    <label>
+      <input type="checkbox" name="remember_me" value="on" style="width: auto; margin-right: 8px;">
+      Mantener mi sesión iniciada en este dispositivo
+    </label>
     <button class="button" type="submit">Ingresar</button>
     <p class="tiny">¿Todavía no tenés cuenta? <a class="text-link" href="{{ url_for('register') }}">Registrate acá</a>.</p>
   </form>

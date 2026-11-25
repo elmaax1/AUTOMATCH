@@ -42,9 +42,16 @@
       <label>Año *<input name="year" type="number" min="1900" max="2100" required></label>
       <label>Kilómetros<input name="kilometers" type="number" min="0" placeholder="Ej. 85000"></label>
       <label>Precio solicitado ($) *<input name="price" type="number" min="1" step="0.01" required></label>
-      <label class="full">Localidad y provincia *<input name="location" required placeholder="Ej. Córdoba, Córdoba"></label>
-      <label class="full">Barrio donde se puede ver el vehículo
-        <input name="neighborhood" placeholder="Ej. Villa Belgrano, Nueva Córdoba, Centro">
+      <label class="full">Provincia *
+        <select name="province" required>
+          <option value="">Selecciona tu provincia</option>
+          {% for item in provinces %}
+          <option value="{{ item }}">{{ item }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="full">Localidad o barrio
+        <input name="neighborhood" placeholder="Ej. Villa Allende, Nueva Cordoba, Centro">
       </label>
       <label class="full">Descripción<textarea name="description" rows="4" placeholder="Estado, equipamiento, detalles..."></textarea></label>
     </div>

@@ -78,19 +78,22 @@
           {% endif %}
           <div class="card-body public-card-body">
             <h3>{{ v.brand }} {{ v.model }}</h3>
-            <p class="price">${{ "{:,.0f}".format(v.price) }}</p>
-            {% if v.neighborhood %}
-              <p class="muted">📍 Barrio: {{ v.neighborhood }}</p>
+                       <p class="price">${{ "{:,.0f}".format(v.price) }}</p>
+
+            {% if v.province %}
+              <p class="muted">📍 {{ v.province }}{% if v.neighborhood %} · {{ v.neighborhood }}{% endif %}</p>
+            {% else %}
+              <p class="muted">📍 {{ v.location }}</p>
             {% endif %}
 
             {% if usuario_actual %}
               <p class="muted">{{ v.category }} · {{ v.year }}</p>
-              <p class="muted">
-                {{ v.location }}
-                {% if v.kilometers %} · {{ "{:,.0f}".format(v.kilometers) }} km{% endif %}
-              </p>
 
-              {% if v.accepts_trade %}
+              {% if v.kilometers %}
+                <p class="muted">{{ "{:,.0f}".format(v.kilometers) }} km</p>
+              {% endif %}
+
+             {% if v.accepts_trade %}
                 <span class="trade-tag">Acepta permuta</span>
               {% endif %}
 
@@ -130,6 +133,12 @@
 
   <form method="get" class="search-form">
     <input name="q" value="{{ query }}" placeholder="Marca o modelo">
+    <select name="province">
+      <option value="">Todas las provincias</option>
+      {% for item in provinces %}
+        <option value="{{ item }}" {% if selected_province == item %}selected{% endif %}>{{ item }}</option>
+      {% endfor %}
+    </select>
 
     {% if usuario_actual %}
       <select name="category">

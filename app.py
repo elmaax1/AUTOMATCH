@@ -43,6 +43,34 @@ else:
 
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 
+PROVINCES = [
+    "Buenos Aires",
+    "Catamarca",
+    "Chaco",
+    "Chubut",
+    "Ciudad Autonoma de Buenos Aires (CABA)",
+    "Cordoba",
+    "Corrientes",
+    "Entre Rios",
+    "Formosa",
+    "Jujuy",
+    "La Pampa",
+    "La Rioja",
+    "Mendoza",
+    "Misiones",
+    "Neuquen",
+    "Rio Negro",
+    "Salta",
+    "San Juan",
+    "San Luis",
+    "Santa Cruz",
+    "Santa Fe",
+    "Santiago del Estero",
+    "Tierra del Fuego, Antartida e Islas del Atlantico Sur",
+    "Tucuman",
+]
+
+
 
 def get_s3_client():
     variables = [
@@ -222,6 +250,9 @@ def index():
     query = request.args.get("q", "").strip()
     category = request.args.get("category", "").strip()
     max_price = request.args.get("max_price", "").strip()
+    province = request.args.get("province", "").strip()
+    if province not in PROVINCES:
+        province = ""
 
     if session.get("user_id"):
         sql = """
@@ -240,6 +271,9 @@ def index():
             WHERE v.status = 'published'
         """
         params = [session.get("user_id")]
+        if province:
+            sql += " AND v.province = %s"
+            params.append(province)
         if query:
             sql += " AND (v.brand ILIKE %s OR v.model ILIKE %s OR v.location ILIKE %s)"
             term = f"%{query}%"
@@ -258,12 +292,13 @@ def index():
             vehicles = db.execute(sql, params).fetchall()
         return render_template(
             "index.html", vehicles=vehicles, query=query,
-            selected_category=category, max_price=max_price
+            selected_category=category, max_price=max_price,
+            selected_province=province, provinces=PROVINCES
         )
 
     # Visitantes: la consulta obtiene los datos publicos de los vehiculos.
     sql = """
-        SELECT v.id, v.brand, v.model, v.neighborhood, v.price,
+        SELECT v.id, v.brand, v.model, v.neighborhood, v.province, v.location, v.price,
         CASE WHEN v.featured = 1 AND v.featured_until IS NOT NULL
              AND v.featured_until > CURRENT_TIMESTAMP
              THEN 1 ELSE 0 END AS is_featured_active,
@@ -273,6 +308,9 @@ def index():
         WHERE v.status = 'published'
     """
     params = []
+    if province:
+        sql += " AND v.province = %s"
+        params.append(province)
     if query:
         sql += " AND (v.brand ILIKE %s OR v.model ILIKE %s)"
         term = f"%{query}%"
@@ -282,7 +320,8 @@ def index():
         vehicles = db.execute(sql, params).fetchall()
     return render_template(
         "index.html", vehicles=vehicles, query=query,
-        selected_category="", max_price=""
+        selected_category="", max_price="",
+        selected_province=province, provinces=PROVINCES
     )
 
 
@@ -470,8 +509,17 @@ def logout():
 def publish():
     if request.method == "POST":
         verify_form_csrf()
+        province = request.form.get("province", "").strip()
+        neighborhood = request.form.get("neighborhood", "").strip()
+
+        if province not in PROVINCES:
+            flash("Selecciona una provincia valida.", "error")
+            return redirect(url_for("publish"))
+
+        location = f"{province}, {neighborhood}" if neighborhood else province
+
         required = ["category", "brand", "model", "year", "price",
-                    "location", "contact_name", "whatsapp"]
+                    "contact_name", "whatsapp"]
         missing = [field for field in required if not request.form.get(field, "").strip()]
         if missing:
             flash("CompletÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ todos los campos obligatorios.", "error")
@@ -510,17 +558,18 @@ def publish():
             with get_db() as db:
                 cursor = db.execute("""
                     INSERT INTO vehicles
-                    (category, brand, model, year, kilometers, price, location, neighborhood,
+                    (category, brand, model, year, kilometers, price, province, location, neighborhood,
                      description, contact_name, whatsapp, email, accepts_trade,
                      trade_details, user_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
                 """, (
                     request.form["category"].strip(),
                     request.form["brand"].strip(),
                     request.form["model"].strip(),
                     year, kilometers, price,
-                    request.form["location"].strip(),
-                    request.form.get("neighborhood", "").strip(),
+                    province,
+                    location,
+                    neighborhood,
                     request.form.get("description", "").strip(),
                     request.form["contact_name"].strip(),
                     request.form["whatsapp"].strip(),
@@ -565,7 +614,11 @@ def publish():
 
         flash("ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡Tu vehÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­culo ya estÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ publicado en AUTOMATCH!", "success")
         return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id))
-    return render_template("publish.html", csrf_token=get_form_csrf_token())
+    return render_template(
+        "publish.html",
+        csrf_token=get_form_csrf_token(),
+        provinces=PROVINCES
+    )
 
 
 @app.route("/vehiculo/<int:vehicle_id>/editar", methods=["GET", "POST"])
@@ -591,9 +644,21 @@ def vehicle_edit(vehicle_id):
     if request.method == "POST":
         verify_form_csrf()
 
+        province = request.form.get("province", "").strip()
+        neighborhood = request.form.get("neighborhood", "").strip()
+
+        if province and province not in PROVINCES:
+            flash("Selecciona una provincia valida.", "error")
+            return redirect(url_for("vehicle_edit", vehicle_id=vehicle_id))
+
+        location = (
+            f"{province}, {neighborhood}" if neighborhood
+            else province
+        ) if province else vehicle["location"]
+
         required = [
             "category", "brand", "model", "year", "price",
-            "location", "contact_name", "whatsapp"
+            "contact_name", "whatsapp"
         ]
 
         missing = [
@@ -685,6 +750,7 @@ def vehicle_edit(vehicle_id):
                             year = %s,
                             kilometers = %s,
                             price = %s,
+                            province = %s,
                             location = %s,
                             neighborhood = %s,
                             description = %s,
@@ -701,8 +767,9 @@ def vehicle_edit(vehicle_id):
                         year,
                         kilometers,
                         price,
-                        request.form["location"].strip(),
-                        request.form.get("neighborhood", "").strip(),
+                        province or vehicle["province"],
+                        location,
+                        neighborhood,
                         request.form.get("description", "").strip(),
                         request.form["contact_name"].strip(),
                         request.form["whatsapp"].strip(),
@@ -843,7 +910,8 @@ def vehicle_edit(vehicle_id):
         "edit_vehicle.html",
         vehicle=vehicle,
         photos=photos,
-        csrf_token=get_form_csrf_token()
+        csrf_token=get_form_csrf_token(),
+        provinces=PROVINCES
     )
 
 @app.route("/uploads/<path:filename>")
@@ -1386,9 +1454,16 @@ def admin_vehicle_edit(vehicle_id):
     if request.method == "POST":
         verificar_admin()
 
+        province = request.form.get("province", "").strip()
+        neighborhood = request.form.get("neighborhood", "").strip()
+
+        if province and province not in PROVINCES:
+            flash("Selecciona una provincia valida.", "error")
+            return redirect(url_for("admin_vehicle_edit", vehicle_id=vehicle_id))
+
         required = [
             "category", "brand", "model", "year", "price",
-            "location", "contact_name", "whatsapp"
+            "contact_name", "whatsapp"
         ]
 
         missing = [
@@ -1414,6 +1489,21 @@ def admin_vehicle_edit(vehicle_id):
         accepts_trade = 1 if request.form.get("accepts_trade") == "on" else 0
 
         with get_db() as db:
+            vehicle = db.execute(
+                "SELECT province, location FROM vehicles WHERE id = %s",
+                (vehicle_id,)
+            ).fetchone()
+
+            if not vehicle:
+                abort(404)
+
+            location = (
+                f"{province}, {neighborhood}" if neighborhood
+                else province
+            ) if province else vehicle["location"]
+
+            province_to_save = province or vehicle["province"]
+
             result = db.execute("""
                 UPDATE vehicles SET
                     category = %s,
@@ -1422,6 +1512,7 @@ def admin_vehicle_edit(vehicle_id):
                     year = %s,
                     kilometers = %s,
                     price = %s,
+                    province = %s,
                     location = %s,
                     neighborhood = %s,
                     description = %s,
@@ -1438,8 +1529,9 @@ def admin_vehicle_edit(vehicle_id):
                 year,
                 kilometers,
                 price,
-                request.form["location"].strip(),
-                request.form.get("neighborhood", "").strip(),
+                province_to_save,
+                location,
+                neighborhood,
                 request.form.get("description", "").strip(),
                 request.form["contact_name"].strip(),
                 request.form["whatsapp"].strip(),
@@ -1470,7 +1562,8 @@ def admin_vehicle_edit(vehicle_id):
     return render_template(
         "admin_edit_vehicle.html",
         vehicle=vehicle,
-        csrf_token=session["admin_csrf_token"]
+        csrf_token=session["admin_csrf_token"],
+        provinces=PROVINCES
     )
 
 

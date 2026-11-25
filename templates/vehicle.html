@@ -26,11 +26,16 @@
         {% if is_favorite %}♥ Guardado en favoritos{% else %}♡ Guardar en favoritos{% endif %}
       </button>
     </form>
-    <p>{{ vehicle.location }} · {{ "{:,.0f}".format(vehicle.kilometers or 0) }} km</p>
-
+    {% if vehicle.province %}
+    <p>{{ vehicle.province }}{% if vehicle.neighborhood %} · {{ vehicle.neighborhood }}{% endif %}</p>
+    {% else %}
+    <p>{{ vehicle.location }}</p>
     {% if vehicle.neighborhood %}
     <p>Barrio: {{ vehicle.neighborhood }}</p>
     {% endif %}
+    {% endif %}
+
+    <p>{{ "{:,.0f}".format(vehicle.kilometers or 0) }} km</p>
     {% if vehicle.accepts_trade %}<span class="trade-tag">Acepta permuta</span>{% endif %}
     <h3>Descripción</h3>
     <p>{{ vehicle.description or "El vendedor no agregó una descripción." }}</p>

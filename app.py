@@ -518,8 +518,7 @@ def publish():
 
         location = f"{province}, {neighborhood}" if neighborhood else province
 
-        required = ["category", "brand", "model", "year", "price",
-                    "contact_name", "whatsapp"]
+        required = ["category", "brand", "model", "year", "price"]
         missing = [field for field in required if not request.form.get(field, "").strip()]
         if missing:
             flash("CompletÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ todos los campos obligatorios.", "error")
@@ -556,6 +555,15 @@ def publish():
 
         try:
             with get_db() as db:
+                user = db.execute(
+                    "SELECT name, email, phone FROM users WHERE id = %s",
+                    (session["user_id"],)
+                ).fetchone()
+
+                if not user:
+                    flash("No se pudieron obtener los datos de tu cuenta.", "error")
+                    return redirect(url_for("publish"))
+
                 cursor = db.execute("""
                     INSERT INTO vehicles
                     (category, brand, model, year, kilometers, price, province, location, neighborhood,
@@ -571,9 +579,9 @@ def publish():
                     location,
                     neighborhood,
                     request.form.get("description", "").strip(),
-                    request.form["contact_name"].strip(),
-                    request.form["whatsapp"].strip(),
-                    request.form.get("email", "").strip(),
+                    user["name"],
+                    user["phone"],
+                    user["email"],
                     accepts_trade,
                     request.form.get("trade_details", "").strip(),
                     session["user_id"]

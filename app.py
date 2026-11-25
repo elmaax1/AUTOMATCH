@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import timedelta
+from urllib.parse import urlsplit
 import os
 import boto3
 import secrets
@@ -26,10 +27,11 @@ SECRET_FILE = BASE_DIR / ".automatch_secret"
 
 app = Flask(__name__)
 
+is_production = os.getenv("AUTOMATCH_ENV", "development").strip().lower() == "production"
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=os.getenv("AUTOMATCH_HTTPS", "0") == "1",
+    SESSION_COOKIE_SECURE=is_production or os.getenv("AUTOMATCH_HTTPS", "0") == "1",
 )
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
@@ -378,6 +380,13 @@ def verify_form_csrf():
     if not token or not secrets.compare_digest(token, enviado):
         abort(400)
 
+
+def is_safe_local_redirect(destination):
+    if not destination or not destination.startswith("/") or "\\" in destination:
+        return False
+    parsed = urlsplit(destination)
+    return not parsed.scheme and not parsed.netloc and not parsed.path.startswith("//")
+
 @app.route("/vehiculo/<int:vehicle_id>/favorito", methods=["POST"])
 @login_required
 def toggle_favorite(vehicle_id):
@@ -492,16 +501,17 @@ def login():
             session["user_id"] = user["id"]
             session.permanent = request.form.get("remember_me") == "on"
             destination = request.args.get("next", "")
-            if not destination.startswith("/") or destination.startswith("//"):
+            if not is_safe_local_redirect(destination):
                 destination = url_for("index")
             return redirect(destination)
         flash("El correo electrÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³nico o la contraseÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±a son incorrectos.", "error")
     return render_template("login.html", csrf_token=get_form_csrf_token())
 
 
-@app.route("/salir")
+@app.route("/salir", methods=["POST"])
 @login_required
 def logout():
+    verify_form_csrf()
     session.clear()
     flash("Cerraste tu sesiÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n correctamente.", "success")
     return redirect(url_for("index"))

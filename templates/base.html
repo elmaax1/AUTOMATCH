@@ -31,7 +31,10 @@
       <a href="{{ url_for('favorites') }}">Mis favoritos</a>
       <a class="nav-cta" href="{{ url_for('publish') }}">Publicar vehículo</a>
       <span class="nav-user">Hola, {{ usuario_actual.name }}</span>
-      <a href="{{ url_for('logout') }}">Salir</a>
+      <form method="post" action="{{ url_for('logout') }}" style="display: inline; margin: 0;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" style="background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer;">Salir</button>
+      </form>
     {% else %}
       <a href="{{ url_for('login') }}">Ingresar</a>
       <a class="nav-cta" href="{{ url_for('register') }}">Crear cuenta</a>

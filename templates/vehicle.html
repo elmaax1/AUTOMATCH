@@ -7,9 +7,18 @@
     {% if photos %}
       <div class="gallery">
       {% for photo in photos %}
-        <img src="{{ url_for('uploaded_file', filename=photo.filename) }}" alt="Fotografía del vehículo">
+        <a class="gallery-photo-link"
+           href="{{ url_for('uploaded_file', filename=photo.filename) }}"
+           aria-label="Ampliar fotografía {{ loop.index }}">
+          <img src="{{ url_for('uploaded_file', filename=photo.filename) }}"
+               alt="Fotografía {{ loop.index }} del vehículo">
+        </a>
       {% endfor %}
       </div>
+      <dialog id="photo-viewer" class="photo-viewer" aria-label="Fotografía ampliada">
+        <button class="photo-viewer-close" type="button" aria-label="Cerrar fotografía">&times;</button>
+        <img class="photo-viewer-image" alt="">
+      </dialog>
     {% else %}
       <div class="no-photo detail-placeholder">Este vehículo todavía no tiene fotografías.</div>
     {% endif %}
@@ -70,4 +79,36 @@
     </div>
   </section>
 </div>
+{% if photos %}
+<script>
+const photoViewer = document.getElementById("photo-viewer");
+
+if (photoViewer && typeof photoViewer.showModal === "function") {
+  const enlargedPhoto = photoViewer.querySelector(".photo-viewer-image");
+
+  document.querySelectorAll(".gallery-photo-link").forEach(link => {
+    link.addEventListener("click", event => {
+      event.preventDefault();
+      const thumbnail = link.querySelector("img");
+      enlargedPhoto.src = link.href;
+      enlargedPhoto.alt = thumbnail ? thumbnail.alt : "Fotografía ampliada del vehículo";
+      photoViewer.showModal();
+    });
+  });
+
+  photoViewer.querySelector(".photo-viewer-close").addEventListener("click", () => {
+    photoViewer.close();
+  });
+
+  photoViewer.addEventListener("click", event => {
+    if (event.target === photoViewer) photoViewer.close();
+  });
+
+  photoViewer.addEventListener("close", () => {
+    enlargedPhoto.removeAttribute("src");
+    enlargedPhoto.alt = "";
+  });
+}
+</script>
+{% endif %}
 {% endblock %}

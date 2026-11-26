@@ -47,6 +47,7 @@ class FakeDatabase:
         vehicle=None,
         payment_update_rowcount=1,
         payment_columns=None,
+        payment_update_error=None,
     ):
         self.payment_columns = set(
             {
@@ -58,20 +59,36 @@ class FakeDatabase:
         )
         self.payments = payments or ([payment] if payment else [])
         self.payment = payment or (self.payments[0] if self.payments else None)
+        vehicle_user_id = (
+            self.payment.get("beneficiary_user_id")
+            if self.payment
+            else None
+        )
+        if vehicle_user_id is None and self.payment:
+            vehicle_user_id = self.payment.get("user_id")
+        if vehicle_user_id is None:
+            vehicle_user_id = 9
         self.vehicle = vehicle or {
             "id": self.payment["vehicle_id"] if self.payment else 34,
-            "user_id": self.payment.get("beneficiary_user_id", 9)
-            if self.payment else 9,
+            "user_id": vehicle_user_id,
             "status": "published",
         }
         self.vehicle.setdefault("featured", False)
         self.vehicle.setdefault("featured_until", None)
+        for row in self.payments:
+            row.setdefault("user_id", self.vehicle["user_id"])
+            row.setdefault(
+                "beneficiary_user_id",
+                self.vehicle["user_id"],
+            )
+            row.setdefault("initiated_by_admin", False)
         self.featured_until = self.vehicle["featured_until"]
         self.payment_select = ""
         self.payment_update_params = None
         self.vehicle_updates = 0
         self.payment_insert_params = None
         self.payment_update_rowcount = payment_update_rowcount
+        self.payment_update_error = payment_update_error
         self.executed_queries = []
         self._snapshot = None
 
@@ -131,7 +148,9 @@ class FakeDatabase:
             self.payment = payment
             return FakeResult()
 
-        if normalized_query.startswith("SELECT id, vehicle_id, plan_days"):
+        if normalized_query.startswith(
+            "SELECT id, vehicle_id, user_id, beneficiary_user_id"
+        ):
             self.payment_select = normalized_query
             reference, order_id = params
             matches = [
@@ -144,13 +163,16 @@ class FakeDatabase:
             ]
             return FakeResult(rows=matches)
 
-        if normalized_query.startswith("SELECT id FROM vehicles"):
+        if normalized_query.startswith("SELECT id, user_id FROM vehicles"):
             vehicle_id = params[0]
             if (
                 self.vehicle["id"] == vehicle_id
                 and self.vehicle["status"] == "published"
             ):
-                return FakeResult({"id": vehicle_id})
+                return FakeResult({
+                    "id": vehicle_id,
+                    "user_id": self.vehicle["user_id"],
+                })
             return FakeResult()
 
         if normalized_query.startswith("UPDATE vehicles"):
@@ -167,6 +189,11 @@ class FakeDatabase:
 
         if normalized_query.startswith("UPDATE payments"):
             self.payment_update_params = params
+            if (
+                "status = 'approved'" in normalized_query
+                and self.payment_update_error is not None
+            ):
+                raise self.payment_update_error
             if "SET status = 'error'" in normalized_query:
                 for payment in self.payments:
                     if payment["external_reference"] == params[0]:
@@ -363,6 +390,122 @@ class SecurityAndPaymentWebhookTests(unittest.TestCase):
             database.featured_until,
             vencimiento_primera_aplicacion,
         )
+
+    def test_webhook_rejects_missing_invalid_and_malformed_signatures(self):
+        order_id = "signature-validation-order"
+        request_id = "signature-validation-request"
+        secret = "test-only-webhook-secret"
+        malformed_signatures = [
+            "ts=not-a-timestamp,v1=" + ("a" * 64),
+            "ts=123",
+            "ts=123,v1=not-a-digest",
+            "ts=123,ts=124,v1=" + ("a" * 64),
+            "ts=123,v1=" + ("a" * 64) + ",v1=" + ("b" * 64),
+        ]
+        headers_to_reject = [
+            {},
+            {"x-request-id": request_id},
+            {
+                "x-signature": self._signature(
+                    order_id, request_id, secret
+                ),
+            },
+            {
+                "x-signature": "ts=123,v1=" + ("0" * 64),
+                "x-request-id": request_id,
+            },
+        ] + [
+            {
+                "x-signature": signature,
+                "x-request-id": request_id,
+            }
+            for signature in malformed_signatures
+        ]
+
+        for index, headers in enumerate(headers_to_reject):
+            with self.subTest(headers=headers):
+                payment = self._pending_payment(
+                    "automatch-invalid-signature-{}".format(index)
+                )
+                database = FakeDatabase(payment)
+                order = self._approved_order(
+                    order_id,
+                    payment["external_reference"],
+                )
+
+                response = self._send_webhook(
+                    database,
+                    order,
+                    webhook_headers=headers,
+                )
+
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(database.executed_queries, [])
+                self.assertEqual(database.vehicle_updates, 0)
+
+    def test_webhook_uses_registered_beneficiary_for_vehicle_owner(self):
+        payment = self._pending_payment("automatch-beneficiary-mismatch")
+        payment["beneficiary_user_id"] = 8
+        database = FakeDatabase(
+            payment,
+            vehicle={
+                "id": 34,
+                "user_id": 9,
+                "status": "published",
+            },
+        )
+        order = self._approved_order(
+            "beneficiary-mismatch-order",
+            payment["external_reference"],
+        )
+
+        response = self._send_webhook(database, order)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(database.vehicle_updates, 0)
+        self.assertEqual(payment["status"], "pending")
+
+    def test_admin_payment_can_activate_its_registered_beneficiary_vehicle(self):
+        payment = self._pending_payment("automatch-admin-beneficiary")
+        payment.update({
+            "user_id": 99,
+            "beneficiary_user_id": 9,
+            "initiated_by_admin": True,
+        })
+        database = FakeDatabase(
+            payment,
+            vehicle={
+                "id": 34,
+                "user_id": 9,
+                "status": "published",
+            },
+        )
+        order = self._approved_order(
+            "admin-beneficiary-order",
+            payment["external_reference"],
+        )
+
+        response = self._send_webhook(database, order)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(database.vehicle_updates, 1)
+        self.assertEqual(payment["status"], "approved")
+
+    def test_legacy_owner_payment_without_beneficiary_remains_compatible(self):
+        payment = self._pending_payment("automatch-legacy-owner")
+        payment["beneficiary_user_id"] = None
+        payment["initiated_by_admin"] = None
+        database = FakeDatabase(payment)
+        order = self._approved_order(
+            "legacy-owner-order",
+            payment["external_reference"],
+        )
+
+        response = self._send_webhook(database, order)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(database.vehicle_updates, 1)
+        self.assertEqual(payment["status"], "approved")
 
     def test_duplicate_external_reference_fails_closed(self):
         order_id = "test-order-duplicate-ref"
@@ -791,6 +934,239 @@ class SecurityAndPaymentWebhookTests(unittest.TestCase):
         self.assertEqual(database.vehicle_updates, 0)
         self.assertEqual(payment["status"], "pending")
 
+    def test_missing_mercado_pago_order_is_retried_without_database_changes(self):
+        payment = self._pending_payment("automatch-missing-order")
+        database = FakeDatabase(payment)
+
+        response = self._send_webhook(
+            database,
+            self._approved_order(
+                "missing-order",
+                payment["external_reference"],
+            ),
+            lookup_response=SimpleNamespace(
+                ok=False,
+                status_code=404,
+            ),
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(database.executed_queries, [])
+        self.assertEqual(database.vehicle_updates, 0)
+        self.assertEqual(payment["status"], "pending")
+
+    def test_pending_order_does_not_activate_vehicle(self):
+        payment = self._pending_payment("automatch-pending-order")
+        database = FakeDatabase(payment)
+        order = self._approved_order(
+            "pending-order",
+            payment["external_reference"],
+        )
+        order["status"] = "action_required"
+        order["status_detail"] = "waiting_payment"
+
+        response = self._send_webhook(database, order)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(database.executed_queries, [])
+        self.assertEqual(database.vehicle_updates, 0)
+        self.assertEqual(payment["status"], "pending")
+
+    def test_rejected_order_does_not_activate_vehicle(self):
+        payment = self._pending_payment("automatch-rejected-order")
+        database = FakeDatabase(payment)
+        order = self._approved_order(
+            "rejected-order",
+            payment["external_reference"],
+        )
+        order["status"] = "rejected"
+        order["status_detail"] = "rejected_by_bank"
+
+        response = self._send_webhook(database, order)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(database.executed_queries, [])
+        self.assertEqual(database.vehicle_updates, 0)
+        self.assertEqual(payment["status"], "pending")
+
+    def test_connection_error_returns_service_unavailable_without_secrets_in_logs(self):
+        payment = self._pending_payment("automatch-connection-error")
+        database = FakeDatabase(payment)
+        secret = "test-only-webhook-secret"
+        access_token = "test-only-access-token"
+
+        with self.assertLogs(automatch.app.logger, level="ERROR") as captured:
+            response = self._send_webhook(
+                database,
+                self._approved_order(
+                    "connection-error-order",
+                    payment["external_reference"],
+                ),
+                lookup_exception=automatch.requests.ConnectionError(
+                    "simulated connection failure"
+                ),
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(database.executed_queries, [])
+        self.assertEqual(database.vehicle_updates, 0)
+        self.assertEqual(payment["status"], "pending")
+        logged_text = "\n".join(captured.output)
+        self.assertIn("ConnectionError", logged_text)
+        self.assertNotIn(secret, logged_text)
+        self.assertNotIn(access_token, logged_text)
+
+    def test_connect_and_read_timeouts_return_service_unavailable(self):
+        timeout_errors = (
+            automatch.requests.ConnectTimeout("simulated connect timeout"),
+            automatch.requests.ReadTimeout("simulated read timeout"),
+        )
+        secret = "test-only-webhook-secret"
+        access_token = "test-only-access-token"
+
+        for index, timeout_error in enumerate(timeout_errors):
+            with self.subTest(error=type(timeout_error).__name__):
+                payment = self._pending_payment(
+                    "automatch-timeout-{}".format(index)
+                )
+                database = FakeDatabase(payment)
+
+                with self.assertLogs(
+                    automatch.app.logger,
+                    level="ERROR",
+                ) as captured:
+                    response, lookup = self._send_webhook(
+                        database,
+                        self._approved_order(
+                            "timeout-order-{}".format(index),
+                            payment["external_reference"],
+                        ),
+                        lookup_exception=timeout_error,
+                        capture_lookup=True,
+                    )
+
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(
+                    lookup.call_args.kwargs["timeout"],
+                    (3, 8),
+                )
+                self.assertEqual(database.executed_queries, [])
+                self.assertEqual(database.vehicle_updates, 0)
+                self.assertEqual(payment["status"], "pending")
+                logged_text = "\n".join(captured.output)
+                self.assertIn(type(timeout_error).__name__, logged_text)
+                self.assertNotIn(secret, logged_text)
+                self.assertNotIn(access_token, logged_text)
+
+    def test_read_timeout_retry_succeeds_without_duplicate_activation(self):
+        payment = self._pending_payment("automatch-read-timeout-retry")
+        database = FakeDatabase(payment)
+        order_id = "read-timeout-retry-order"
+        request_id = "read-timeout-retry-request"
+        secret = "test-only-webhook-secret"
+        access_token = "test-only-access-token"
+        order = self._approved_order(
+            order_id,
+            payment["external_reference"],
+        )
+        lookup_response = SimpleNamespace(
+            ok=True,
+            json=lambda: order,
+        )
+        headers = {
+            "x-signature": self._signature(order_id, request_id, secret),
+            "x-request-id": request_id,
+        }
+
+        with patch.dict(os.environ, {
+            "MERCADOPAGO_WEBHOOK_SECRET": secret,
+            "MERCADOPAGO_ACCESS_TOKEN": access_token,
+        }):
+            with patch.object(automatch, "is_production", False):
+                with patch.object(
+                    automatch,
+                    "get_db",
+                    return_value=database,
+                ):
+                    with patch.object(
+                        automatch.requests,
+                        "get",
+                        side_effect=[
+                            automatch.requests.ReadTimeout(
+                                "simulated read timeout"
+                            ),
+                            lookup_response,
+                        ],
+                    ) as lookup:
+                        client = automatch.app.test_client()
+                        with self.assertLogs(
+                            automatch.app.logger,
+                            level="ERROR",
+                        ) as captured:
+                            first_response = client.post(
+                                "/webhook/mercadopago?data.id={}".format(
+                                    order_id
+                                ),
+                                json={
+                                    "type": "order",
+                                    "live_mode": False,
+                                    "data": {"id": order_id},
+                                },
+                                headers=headers,
+                            )
+                            second_response = client.post(
+                                "/webhook/mercadopago?data.id={}".format(
+                                    order_id
+                                ),
+                                json={
+                                    "type": "order",
+                                    "live_mode": False,
+                                    "data": {"id": order_id},
+                                },
+                                headers=headers,
+                            )
+
+        self.assertEqual(first_response.status_code, 503)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(lookup.call_count, 2)
+        self.assertTrue(all(
+            call.kwargs["timeout"] == (3, 8)
+            for call in lookup.call_args_list
+        ))
+        self.assertEqual(database.vehicle_updates, 1)
+        self.assertEqual(payment["status"], "approved")
+        self.assertNotIn(secret, "\n".join(captured.output))
+        self.assertNotIn(access_token, "\n".join(captured.output))
+
+    def test_database_connection_error_rolls_back_and_returns_service_unavailable(self):
+        payment = self._pending_payment("automatch-database-error")
+        database = FakeDatabase(
+            payment,
+            payment_update_error=automatch.psycopg.OperationalError(
+                "simulated database outage"
+            ),
+        )
+        payment_before = deepcopy(payment)
+        vehicle_before = deepcopy(database.vehicle)
+        featured_until_before = database.featured_until
+
+        with self.assertLogs(automatch.app.logger, level="ERROR") as captured:
+            response = self._send_webhook(
+                database,
+                self._approved_order(
+                    "database-error-order",
+                    payment["external_reference"],
+                ),
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(payment, payment_before)
+        self.assertEqual(database.vehicle, vehicle_before)
+        self.assertEqual(database.featured_until, featured_until_before)
+        logged_text = "\n".join(captured.output)
+        self.assertIn("OperationalError", logged_text)
+        self.assertNotIn("simulated database outage", logged_text)
+
     def test_test_environment_ignores_live_webhooks(self):
         request_id = "test-request-123"
         order_id = "live-order-123"
@@ -903,6 +1279,9 @@ class SecurityAndPaymentWebhookTests(unittest.TestCase):
         order,
         notified_order_id=None,
         lookup_response=None,
+        webhook_headers=None,
+        lookup_exception=None,
+        capture_lookup=False,
     ):
         order_id = str(notified_order_id or order["id"])
         request_id = "test-webhook-request"
@@ -911,6 +1290,14 @@ class SecurityAndPaymentWebhookTests(unittest.TestCase):
             ok=True,
             json=lambda: order,
         )
+        headers = webhook_headers
+        if headers is None:
+            headers = {
+                "x-signature": self._signature(
+                    order_id, request_id, secret
+                ),
+                "x-request-id": request_id,
+            }
 
         with patch.dict(os.environ, {
             "MERCADOPAGO_WEBHOOK_SECRET": secret,
@@ -918,25 +1305,31 @@ class SecurityAndPaymentWebhookTests(unittest.TestCase):
         }):
             with patch.object(automatch, "is_production", False):
                 with patch.object(automatch, "get_db", return_value=database):
-                    with patch.object(
-                        automatch.requests,
-                        "get",
-                        return_value=response_from_mp,
-                    ):
-                        return automatch.app.test_client().post(
+                    if lookup_exception is not None:
+                        lookup_patch = patch.object(
+                            automatch.requests,
+                            "get",
+                            side_effect=lookup_exception,
+                        )
+                    else:
+                        lookup_patch = patch.object(
+                            automatch.requests,
+                            "get",
+                            return_value=response_from_mp,
+                        )
+                    with lookup_patch as lookup_mock:
+                        response = automatch.app.test_client().post(
                             "/webhook/mercadopago?data.id={}".format(order_id),
                             json={
                                 "type": "order",
                                 "live_mode": False,
                                 "data": {"id": order_id},
                             },
-                            headers={
-                                "x-signature": self._signature(
-                                    order_id, request_id, secret
-                                ),
-                                "x-request-id": request_id,
-                            },
+                            headers=headers,
                         )
+                        if capture_lookup:
+                            return response, lookup_mock
+                        return response
 
     def _create_payment(self, payer, vehicle, mercado_pago_responses):
         database = FakeDatabase(vehicle=vehicle)

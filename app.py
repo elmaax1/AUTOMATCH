@@ -1170,19 +1170,39 @@ def verificar_firma_mercadopago(data_id):
     firma = request.headers.get("x-signature", "")
     request_id = request.headers.get("x-request-id", "")
 
-    if not secreto or not firma or not request_id or not data_id:
+    if (
+        not secreto
+        or not firma
+        or not request_id.strip()
+        or not data_id
+    ):
         return False
 
     partes = {}
     for elemento in firma.split(","):
-        if "=" in elemento:
-            clave, valor = elemento.split("=", 1)
-            partes[clave.strip()] = valor.strip()
+        if "=" not in elemento:
+            return False
+        clave, valor = elemento.split("=", 1)
+        clave = clave.strip()
+        valor = valor.strip()
+        if not clave or not valor or clave in partes:
+            return False
+        partes[clave] = valor
 
     timestamp = partes.get("ts")
     firma_recibida = partes.get("v1")
 
-    if not timestamp or not firma_recibida:
+    if (
+        not timestamp
+        or not timestamp.isascii()
+        or not timestamp.isdigit()
+        or not firma_recibida
+        or len(firma_recibida) != hashlib.sha256().digest_size * 2
+        or any(
+            caracter not in "0123456789abcdefABCDEF"
+            for caracter in firma_recibida
+        )
+    ):
         return False
 
     manifest = (
@@ -1224,7 +1244,7 @@ def mercado_pago_webhook():
         return "", 400
 
     if not verificar_firma_mercadopago(data_id):
-        app.logger.warning("Firma de Webhook invÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡lida.")
+        app.logger.warning("Firma de webhook inválida.")
         return "", 401
 
     if notificacion.get("type") != "order":
@@ -1241,16 +1261,21 @@ def mercado_pago_webhook():
         respuesta = requests.get(
             f"https://api.mercadopago.com/v1/orders/{data_id}",
             headers={"Authorization": f"Bearer {access_token}"},
-            timeout=20
+            timeout=(3, 8)
         )
         if not respuesta.ok:
-            app.logger.error("No se pudo consultar la orden notificada.")
+            app.logger.error(
+                "No se pudo consultar la orden notificada (HTTP %s).",
+                respuesta.status_code,
+            )
             return "", 503
 
         orden = respuesta.json()
 
         if not isinstance(orden, dict):
-            app.logger.error("La respuesta de la orden no tiene un formato valido.")
+            app.logger.error(
+                "La respuesta de la orden no tiene un formato válido."
+            )
             return "", 503
 
         if str(orden.get("id")) != str(data_id):
@@ -1320,8 +1345,16 @@ def mercado_pago_webhook():
             importes_acreditados, Decimal("0")
         )
 
-    except (requests.RequestException, ValueError, InvalidOperation, TypeError):
-        app.logger.exception("Error al verificar la orden de Mercado Pago.")
+    except (
+        requests.RequestException,
+        ValueError,
+        InvalidOperation,
+        TypeError,
+    ) as error:
+        app.logger.error(
+            "Error al verificar la orden de Mercado Pago (%s).",
+            type(error).__name__,
+        )
         return "", 503
 
     planes = {
@@ -1330,98 +1363,132 @@ def mercado_pago_webhook():
         30: Decimal("7000")
     }
 
-    with get_db() as db:
+    try:
+        with get_db() as db:
+            pagos = db.execute("""
+                SELECT id, vehicle_id, user_id, beneficiary_user_id,
+                       initiated_by_admin, plan_days, amount, currency,
+                       status, external_reference, mp_order_id
+                FROM payments
+                WHERE external_reference = %s
+                  AND (mp_order_id = %s OR mp_order_id IS NULL)
+                FOR UPDATE
+            """, (referencia, str(data_id))).fetchall()
 
-        pagos = db.execute("""
-            SELECT id, vehicle_id, plan_days, amount, currency,
-                   status, external_reference, mp_order_id
-            FROM payments
-            WHERE external_reference = %s
-              AND (mp_order_id = %s OR mp_order_id IS NULL)
-            FOR UPDATE
-        """, (referencia, str(data_id))).fetchall()
+            if len(pagos) > 1:
+                app.logger.error(
+                    "Referencia externa duplicada; no se aplicó la orden."
+                )
+                abort(503)
 
-        if len(pagos) > 1:
-            app.logger.error(
-                "Referencia externa duplicada; no se aplico la orden %s.",
-                data_id
-            )
-            abort(503)
+            if not pagos:
+                app.logger.warning(
+                    "Orden sin pago asociado en AUTOMATCH."
+                )
+                return "", 200
 
-        if not pagos:
-            app.logger.warning("Orden sin pago asociado en AUTOMATCH.")
-            return "", 200
+            pago = pagos[0]
 
-        pago = pagos[0]
+            if pago["status"] != "pending":
+                return "", 200
 
-        if pago["status"] != "pending":
-            return "", 200
+            dias = pago["plan_days"]
 
-        dias = pago["plan_days"]
+            if (
+                dias not in planes
+                or Decimal(str(pago["amount"])) != planes[dias]
+                or importe_orden != planes[dias]
+                or importe_pagado != planes[dias]
+                or importe_total_transacciones != planes[dias]
+                or importe_total_acreditado != planes[dias]
+                or moneda != "ARS"
+                or pago["currency"] != "ARS"
+            ):
+                app.logger.warning(
+                    "Importe o moneda no coinciden con el pago."
+                )
+                return "", 200
 
-        if (
-            dias not in planes
-            or Decimal(str(pago["amount"])) != planes[dias]
-            or importe_orden != planes[dias]
-            or importe_pagado != planes[dias]
-            or importe_total_transacciones != planes[dias]
-            or importe_total_acreditado != planes[dias]
-            or moneda != "ARS"
-            or pago["currency"] != "ARS"
-        ):
-            app.logger.warning("Importe o moneda no coinciden con el pago.")
-            return "", 200
+            vehiculo = db.execute("""
+                SELECT id, user_id
+                FROM vehicles
+                WHERE id = %s AND status = 'published'
+                FOR UPDATE
+            """, (pago["vehicle_id"],)).fetchone()
 
-        vehiculo = db.execute("""
-            SELECT id
-            FROM vehicles
-            WHERE id = %s AND status = 'published'
-            FOR UPDATE
-        """, (pago["vehicle_id"],)).fetchone()
+            if not vehiculo:
+                app.logger.error(
+                    "Pago acreditado, pero el vehículo no existe o no está "
+                    "publicado."
+                )
+                return "", 200
 
-        if not vehiculo:
-            app.logger.error(
-                "Pago acreditado, pero el vehÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­culo %s no existe o no estÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ publicado.",
-                pago["vehicle_id"]
-            )
-            return "", 200
+            beneficiario_id = pago["beneficiary_user_id"]
+            if beneficiario_id is None:
+                es_pago_legacy_del_propietario = (
+                    pago["initiated_by_admin"] is not True
+                    and pago["user_id"] == vehiculo["user_id"]
+                )
+                if not es_pago_legacy_del_propietario:
+                    app.logger.warning(
+                        "El pago no tiene un beneficiario verificable."
+                    )
+                    return "", 200
+                app.logger.warning(
+                    "Pago anterior a la migración; se verificó al propietario."
+                )
+            elif beneficiario_id != vehiculo["user_id"]:
+                app.logger.warning(
+                    "El beneficiario del pago no coincide con el propietario."
+                )
+                return "", 200
 
-        vehiculo_actualizado = db.execute("""
-            UPDATE vehicles
-            SET featured = 1,
-                featured_until =
-                    GREATEST(
-                        COALESCE(featured_until, CURRENT_TIMESTAMP),
-                        CURRENT_TIMESTAMP
-                    ) + (%s * INTERVAL '1 day')
-            WHERE id = %s AND status = 'published'
-            RETURNING featured, featured_until
-        """, (dias, pago["vehicle_id"])).fetchone()
+            vehiculo_actualizado = db.execute("""
+                UPDATE vehicles
+                SET featured = 1,
+                    featured_until =
+                        GREATEST(
+                            COALESCE(featured_until, CURRENT_TIMESTAMP),
+                            CURRENT_TIMESTAMP
+                        ) + (%s * INTERVAL '1 day')
+                WHERE id = %s AND status = 'published'
+                RETURNING featured, featured_until
+            """, (dias, pago["vehicle_id"])).fetchone()
 
-        if not vehiculo_actualizado or not vehiculo_actualizado["featured"]:
-            app.logger.error("No se pudo activar el destacado del vehÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­culo.")
-            return "", 200
+            if (
+                not vehiculo_actualizado
+                or not vehiculo_actualizado["featured"]
+            ):
+                app.logger.error(
+                    "No se pudo activar el destacado del vehículo."
+                )
+                return "", 200
 
-        vencimiento = vehiculo_actualizado["featured_until"]
+            vencimiento = vehiculo_actualizado["featured_until"]
 
-        pago_actualizado = db.execute("""
-            UPDATE payments
-            SET mp_order_id = COALESCE(mp_order_id, %s),
-                status = 'approved',
-                approved_at = CURRENT_TIMESTAMP,
-                expires_at = %s
-            WHERE id = %s AND status = 'pending'
-              AND (mp_order_id IS NULL OR mp_order_id = %s)
-        """, (str(data_id), vencimiento, pago["id"], str(data_id)))
+            pago_actualizado = db.execute("""
+                UPDATE payments
+                SET mp_order_id = COALESCE(mp_order_id, %s),
+                    status = 'approved',
+                    approved_at = CURRENT_TIMESTAMP,
+                    expires_at = %s
+                WHERE id = %s AND status = 'pending'
+                  AND (mp_order_id IS NULL OR mp_order_id = %s)
+            """, (str(data_id), vencimiento, pago["id"], str(data_id)))
 
-        if pago_actualizado.rowcount != 1:
-            app.logger.error(
-                "No se pudo asociar la orden verificada al pago %s.",
-                pago["id"]
-            )
-            abort(503)
+            if pago_actualizado.rowcount != 1:
+                app.logger.error(
+                    "No se pudo asociar la orden verificada al pago."
+                )
+                abort(503)
+    except (psycopg.OperationalError, psycopg.InterfaceError) as error:
+        app.logger.error(
+            "Fallo temporal de base de datos al procesar el webhook (%s).",
+            type(error).__name__,
+        )
+        return "", 503
 
-    app.logger.info("Orden de Mercado Pago verificada: %s", data_id)
+    app.logger.info("Orden de Mercado Pago verificada.")
     return "", 200
 
 

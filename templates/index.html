@@ -15,7 +15,7 @@
     {% if usuario_actual %}
       <a class="button light" href="{{ url_for('publish') }}">Publicar mi vehículo</a>
     {% else %}
-      <a class="button light" href="{{ url_for('register') }}">Quiero publicar</a>
+      <a class="button light" href="{{ url_for('publish') }}">Quiero publicar</a>
     {% endif %}
   </div>
   <div class="hero-decoration">
@@ -41,11 +41,7 @@
       {% for v in vehicles %}
         <article class="vehicle-card">
           <div class="photo-container">
-          {% if usuario_actual %}
             <a href="{{ url_for('vehicle_detail', vehicle_id=v.id) }}" class="photo-wrap">
-          {% else %}
-            <a href="{{ url_for('login', next=url_for('vehicle_detail', vehicle_id=v.id)) }}" class="photo-wrap">
-          {% endif %}
 
             {% if v.is_featured_active %}
               <span class="featured-tag">DESTACADO</span>
@@ -78,7 +74,7 @@
           {% endif %}
           <div class="card-body public-card-body">
             <h3>{{ v.brand }} {{ v.model }}</h3>
-                       <p class="price">${{ "{:,.0f}".format(v.price) }}</p>
+            <p class="price">${{ "{:,.0f}".format(v.price) }}</p>
 
             {% if v.province %}
               <p class="muted">📍 {{ v.province }}{% if v.neighborhood %} · {{ v.neighborhood }}{% endif %}</p>
@@ -86,26 +82,22 @@
               <p class="muted">📍 {{ v.location }}</p>
             {% endif %}
 
-            {% if usuario_actual %}
-              <p class="muted">{{ v.category }} · {{ v.year }}</p>
+            <p class="muted">{{ v.category }} · {{ v.year }}</p>
 
-              {% if v.kilometers %}
-                <p class="muted">{{ "{:,.0f}".format(v.kilometers) }} km</p>
-              {% endif %}
-
-             {% if v.accepts_trade %}
-                <span class="trade-tag">Acepta permuta</span>
-              {% endif %}
-
-              <a class="text-link" href="{{ url_for('vehicle_detail', vehicle_id=v.id) }}">
-                Ver publicación →
-              </a>
-            {% else %}
-              <a class="text-link"
-                 href="{{ url_for('login', next=url_for('vehicle_detail', vehicle_id=v.id)) }}">
-                Ingresá para ver los detalles
-              </a>
+            {% if v.kilometers %}
+              <p class="muted">{{ "{:,.0f}".format(v.kilometers) }} km</p>
             {% endif %}
+
+            {% if v.accepts_trade %}
+              <span class="trade-tag">Acepta permuta</span>
+              {% if v.trade_details %}
+                <p class="muted">Busca: {{ v.trade_details }}</p>
+              {% endif %}
+            {% endif %}
+
+            <a class="text-link" href="{{ url_for('vehicle_detail', vehicle_id=v.id) }}">
+              Ver publicación →
+            </a>
           </div>
         </article>
       {% endfor %}
@@ -119,7 +111,7 @@
       {% if usuario_actual %}
         <a class="button" href="{{ url_for('publish') }}">Publicar el primero</a>
       {% else %}
-        <a class="button" href="{{ url_for('register') }}">Crear cuenta</a>
+        <a class="button" href="{{ url_for('publish') }}">Quiero publicar</a>
       {% endif %}
     </div>
   {% endif %}
@@ -140,17 +132,15 @@
       {% endfor %}
     </select>
 
-    {% if usuario_actual %}
-      <select name="category">
-        <option value="">Todos los vehículos</option>
-        {% for item in ["Auto", "Moto", "Camioneta", "Utilitario", "Camión", "Otro"] %}
-          <option value="{{ item }}" {% if selected_category == item %}selected{% endif %}>{{ item }}</option>
-        {% endfor %}
-      </select>
+    <select name="category">
+      <option value="">Todos los vehículos</option>
+      {% for item in ["Auto", "Moto", "Camioneta", "Utilitario", "Camión", "Otro"] %}
+        <option value="{{ item }}" {% if selected_category == item %}selected{% endif %}>{{ item }}</option>
+      {% endfor %}
+    </select>
 
-      <input name="max_price" type="number" min="1" step="any"
-             value="{{ max_price }}" placeholder="Precio máximo">
-    {% endif %}
+    <input name="max_price" type="number" min="1" step="any"
+           value="{{ max_price }}" placeholder="Precio máximo">
 
     <button class="button" type="submit">Buscar vehículos</button>
   </form>

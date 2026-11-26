@@ -45,7 +45,12 @@
     {% endif %}
 
     <p>{{ "{:,.0f}".format(vehicle.kilometers or 0) }} km</p>
-    {% if vehicle.accepts_trade %}<span class="trade-tag">Acepta permuta</span>{% endif %}
+    {% if vehicle.accepts_trade %}
+      <span class="trade-tag">Acepta permuta</span>
+      {% if vehicle.trade_details %}
+        <p>Busca: {{ vehicle.trade_details }}</p>
+      {% endif %}
+    {% endif %}
     <h3>Descripción</h3>
     <p>{{ vehicle.description or "El vendedor no agregó una descripción." }}</p>
     {% if usuario_actual and (usuario_actual.role == 'admin' or usuario_actual.id == vehicle.user_id) %}

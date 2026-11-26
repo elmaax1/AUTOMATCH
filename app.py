@@ -333,7 +333,9 @@ def index():
 
     # Visitantes: la consulta obtiene los datos publicos de los vehiculos.
     sql = """
-        SELECT v.id, v.brand, v.model, v.neighborhood, v.province, v.location, v.price,
+        SELECT v.id, v.brand, v.model, v.neighborhood, v.province, v.location,
+        v.price, v.category, v.year, v.kilometers, v.accepts_trade,
+        v.trade_details,
         CASE WHEN v.featured = 1 AND v.featured_until IS NOT NULL
              AND v.featured_until > CURRENT_TIMESTAMP
              THEN 1 ELSE 0 END AS is_featured_active,
@@ -347,15 +349,24 @@ def index():
         sql += " AND v.province = %s"
         params.append(province)
     if query:
-        sql += " AND (v.brand ILIKE %s OR v.model ILIKE %s)"
+        sql += " AND (v.brand ILIKE %s OR v.model ILIKE %s OR v.location ILIKE %s)"
         term = f"%{query}%"
-        params.extend([term, term])
+        params.extend([term, term, term])
+    if category:
+        sql += " AND v.category = %s"
+        params.append(category)
+    if max_price:
+        try:
+            sql += " AND v.price <= %s"
+            params.append(float(max_price))
+        except ValueError:
+            flash("El precio máximo debe ser un número.", "error")
     sql += " ORDER BY CASE WHEN v.featured = 1 AND v.featured_until > CURRENT_TIMESTAMP THEN 1 ELSE 0 END DESC, v.created_at DESC" 
     with get_db() as db:
         vehicles = db.execute(sql, params).fetchall()
     return render_template(
         "index.html", vehicles=vehicles, query=query,
-        selected_category="", max_price="",
+        selected_category=category, max_price=max_price,
         selected_province=province, provinces=PROVINCES
     )
 
@@ -485,8 +496,13 @@ def favorites():
 
 @app.route("/registro", methods=["GET", "POST"])
 def register():
+    next_url = request.args.get("next", "")
+    if not is_safe_local_redirect(next_url):
+        next_url = ""
+    publication_registration = next_url == url_for("publish")
+
     if session.get("user_id"):
-        return redirect(url_for("index"))
+        return redirect(next_url or url_for("index"))
     if request.method == "POST":
         verify_form_csrf()
         name = request.form.get("name", "").strip()
@@ -511,16 +527,25 @@ def register():
                     session.clear()
                     session["user_id"] = cursor.fetchone()["id"]
                 flash("Tu cuenta fue creada correctamente. ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡Bienvenido a AUTOMATCH!", "success")
-                return redirect(url_for("index"))
+                return redirect(next_url or url_for("index"))
             except psycopg.IntegrityError:
                 flash("Ya existe una cuenta registrada con ese correo electrÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³nico.", "error")
-    return render_template("register.html", csrf_token=get_form_csrf_token())
+    return render_template(
+        "register.html",
+        csrf_token=get_form_csrf_token(),
+        next_url=next_url,
+        publication_registration=publication_registration,
+    )
 
 
 @app.route("/ingresar", methods=["GET", "POST"])
 def login():
+    next_url = request.args.get("next", "")
+    if not is_safe_local_redirect(next_url):
+        next_url = ""
+
     if session.get("user_id"):
-        return redirect(url_for("index"))
+        return redirect(next_url or url_for("index"))
     if request.method == "POST":
         verify_form_csrf()
         email = request.form.get("email", "").strip().lower()
@@ -531,12 +556,13 @@ def login():
             session.clear()
             session["user_id"] = user["id"]
             session.permanent = request.form.get("remember_me") == "on"
-            destination = request.args.get("next", "")
-            if not is_safe_local_redirect(destination):
-                destination = url_for("index")
-            return redirect(destination)
+            return redirect(next_url or url_for("index"))
         flash("El correo electrÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³nico o la contraseÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±a son incorrectos.", "error")
-    return render_template("login.html", csrf_token=get_form_csrf_token())
+    return render_template(
+        "login.html",
+        csrf_token=get_form_csrf_token(),
+        next_url=next_url,
+    )
 
 
 @app.route("/salir", methods=["POST"])
@@ -549,8 +575,10 @@ def logout():
 
 
 @app.route("/publicar", methods=["GET", "POST"])
-@login_required
 def publish():
+    if not session.get("user_id"):
+        return redirect(url_for("register", next=url_for("publish")))
+
     if request.method == "POST":
         verify_form_csrf()
         province = request.form.get("province", "").strip()
@@ -1493,7 +1521,6 @@ def mercado_pago_webhook():
 
 
 @app.route("/vehiculo/<int:vehicle_id>")
-@login_required
 def vehicle_detail(vehicle_id):
     with get_db() as db:
         vehicle = db.execute(

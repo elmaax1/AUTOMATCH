@@ -5,7 +5,10 @@
 <div class="form-page auth-page">
   <p class="eyebrow">SUMATE A AUTOMATCH</p>
   <h1>Crear cuenta</h1>
-  <p class="muted">Registrate para publicar vehículos y consultar toda la información.</p>
+  {% if publication_registration %}
+    <p class="notice info">¡Creá tu cuenta para publicar! Para publicar un vehículo en AUTOMATCHCBA, primero necesitás registrarte.</p>
+  {% endif %}
+  <p class="muted">Registrate para publicar vehículos en AUTOMATCHCBA.</p>
 
   <form method="post" class="form-card">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -40,7 +43,7 @@
 
     <p class="tiny">
       ¿Ya tenés una cuenta?
-      <a class="text-link" href="{{ url_for('login') }}">Ingresá acá</a>.
+      <a class="text-link" href="{{ url_for('login', next=next_url) if next_url else url_for('login') }}">Iniciá sesión</a>.
     </p>
   </form>
 </div>

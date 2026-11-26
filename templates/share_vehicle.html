@@ -15,8 +15,8 @@
   <h1>{{ vehicle.brand }} {{ vehicle.model }}</h1>
   <p class="price large">${{ "{:,.0f}".format(vehicle.price) }}</p>
   <p>Esta publicacion esta en AUTOMATCHCBA.</p>
-  <a class="button" href="{{ url_for('login', next=url_for('vehicle_detail', vehicle_id=vehicle.id)) }}">
-    Ingresar para ver los detalles
+  <a class="button" href="{{ url_for('vehicle_detail', vehicle_id=vehicle.id) }}">
+    Ver publicación completa
   </a>
   <p><a class="text-link" href="{{ url_for('index') }}">Ver mas vehiculos</a></p>
 </section>

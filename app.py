@@ -25,25 +25,56 @@ UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 SECRET_FILE = BASE_DIR / ".automatch_secret"
 
+AUTOMATCH_ENV = os.getenv("AUTOMATCH_ENV", "development").strip().lower()
+if AUTOMATCH_ENV not in {"development", "test", "production"}:
+    raise RuntimeError(
+        "AUTOMATCH_ENV debe ser development, test o production."
+    )
+
+is_production = AUTOMATCH_ENV == "production"
+
+
+def get_app_secret_key(secret_file, configured_secret, environment):
+    if configured_secret and configured_secret.strip():
+        return configured_secret
+
+    if environment == "production":
+        raise RuntimeError(
+            "AUTOMATCH_SECRET_KEY debe configurarse en producción."
+        )
+
+    if not secret_file.exists():
+        secret_file.write_text(secrets.token_hex(32), encoding="utf-8")
+
+    secret_key = secret_file.read_text(encoding="utf-8").strip()
+    if not secret_key:
+        raise RuntimeError("El archivo de clave secreta está vacío.")
+    return secret_key
+
+
+def secure_session_cookie(environment, https_override):
+    return environment == "production" or https_override.strip() == "1"
+
+
 app = Flask(__name__)
 
-is_production = os.getenv("AUTOMATCH_ENV", "development").strip().lower() == "production"
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=is_production or os.getenv("AUTOMATCH_HTTPS", "0") == "1",
+    SESSION_COOKIE_SECURE=secure_session_cookie(
+        AUTOMATCH_ENV, os.getenv("AUTOMATCH_HTTPS", "0")
+    ),
 )
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_DIR)
 
 # La clave se conserva entre reinicios. No compartas el archivo .automatch_secret.
-if os.environ.get("AUTOMATCH_SECRET_KEY"):
-    app.secret_key = os.environ["AUTOMATCH_SECRET_KEY"]
-else:
-    if not SECRET_FILE.exists():
-        SECRET_FILE.write_text(secrets.token_hex(32), encoding="utf-8")
-    app.secret_key = SECRET_FILE.read_text(encoding="utf-8").strip()
+app.secret_key = get_app_secret_key(
+    SECRET_FILE,
+    os.environ.get("AUTOMATCH_SECRET_KEY"),
+    AUTOMATCH_ENV
+)
 
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 
@@ -943,6 +974,66 @@ def uploaded_file(filename):
     return redirect(get_public_photo_url(filename))
 
 
+def solicitar_orden_mercadopago(datos, access_token, clave_idempotencia):
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "X-Idempotency-Key": clave_idempotencia
+    }
+    id_orden_recibida = None
+    resultado_ambiguo = False
+
+    for intento in range(2):
+        try:
+            respuesta = requests.post(
+                "https://api.mercadopago.com/v1/orders",
+                headers=headers,
+                json=datos,
+                timeout=30
+            )
+        except requests.RequestException:
+            resultado_ambiguo = True
+            continue
+
+        codigo = getattr(respuesta, "status_code", 0)
+        if not respuesta.ok:
+            es_transitorio = (
+                codigo in {408, 409, 425, 429}
+                or 300 <= codigo < 400
+                or codigo >= 500
+            )
+            if es_transitorio or resultado_ambiguo:
+                resultado_ambiguo = True
+                continue
+            return "rejected", None, None
+
+        try:
+            orden = respuesta.json()
+        except (requests.RequestException, ValueError):
+            resultado_ambiguo = True
+            continue
+
+        if not isinstance(orden, dict):
+            resultado_ambiguo = True
+            continue
+
+        id_orden = orden.get("id")
+        if id_orden:
+            id_orden_recibida = str(id_orden)
+
+        checkout_url = orden.get("checkout_url")
+        if (
+            id_orden_recibida
+            and isinstance(checkout_url, str)
+            and checkout_url.startswith("https://")
+        ):
+            return "created", id_orden_recibida, checkout_url
+
+        resultado_ambiguo = True
+
+    return "ambiguous", id_orden_recibida, None
+
+
 
 @app.route("/vehiculo/<int:vehicle_id>/destacar", methods=["POST"])
 @login_required
@@ -993,81 +1084,84 @@ def vehicle_feature_payment(vehicle_id):
     with get_db() as db:
         db.execute("""
             INSERT INTO payments (
-                user_id, vehicle_id, plan_days, amount,
+                user_id, vehicle_id, beneficiary_user_id,
+                initiated_by_admin, plan_days, amount,
                 currency, payment_method, status,
                 external_reference, idempotency_key
             )
-            VALUES (%s, %s, %s, %s, 'ARS', 'mercadopago', 'pending', %s, %s)
+            VALUES (
+                %s, %s, %s, %s, %s, %s, 'ARS',
+                'mercadopago', 'pending', %s, %s
+            )
         """, (
-            user["id"], vehicle_id, dias, importe,
+            user["id"], vehicle_id, vehicle["user_id"],
+            user["role"] == "admin", dias, importe,
             referencia, clave_idempotencia
         ))
 
     datos = {
         "type": "online",
         "processing_mode": "manual",
+        "capture_mode": "automatic",
         "total_amount": f"{importe:.2f}",
         "external_reference": referencia,
-        "description": f"Destacado AUTOMATCH por {dias} dÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­as",
+        "description": f"Destacado AUTOMATCH por {dias} días",
         "payer": {
             "email": user["email"]
         },
         "items": [{
-            "title": f"PublicaciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n destacada por {dias} dÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­as",
+            "title": f"Publicación destacada por {dias} días",
             "unit_price": f"{importe:.2f}",
             "quantity": 1
         }]
     }
 
-    try:
-        respuesta = requests.post(
-            "https://api.mercadopago.com/v1/orders",
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json",
-                "X-Idempotency-Key": clave_idempotencia
-            },
-            json=datos,
-            timeout=30
-        )
+    estado_orden, order_id, checkout_url = solicitar_orden_mercadopago(
+        datos, access_token, clave_idempotencia
+    )
 
-        resultado = respuesta.json()
-
-        if not respuesta.ok:
-            raise ValueError("Mercado Pago no aceptÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ la orden.")
-
-        order_id = resultado.get("id")
-        checkout_url = resultado.get("checkout_url")
-
-        if not order_id or not checkout_url:
-            raise ValueError("La respuesta no contiene los datos de pago.")
-
-        with get_db() as db:
-            db.execute("""
-                UPDATE payments
-                SET mp_order_id = %s, checkout_url = %s
-                WHERE external_reference = %s
-            """, (order_id, checkout_url, referencia))
-
-        if not checkout_url.startswith("https://"):
-            raise ValueError("La direcciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n de pago no es segura.")
-
-        return redirect(checkout_url)
-
-    except (requests.RequestException, ValueError, KeyError):
+    if estado_orden == "rejected":
         with get_db() as db:
             db.execute("""
                 UPDATE payments
                 SET status = 'error'
-                WHERE external_reference = %s
+                WHERE external_reference = %s AND status = 'pending'
             """, (referencia,))
 
-        app.logger.exception("No se pudo crear la orden de Mercado Pago.")
+        app.logger.warning("Mercado Pago rechazo definitivamente la orden.")
+        flash("Mercado Pago no pudo aceptar el inicio del pago.", "error")
+        return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id))
+
+    if order_id:
+        with get_db() as db:
+            orden_actualizada = db.execute("""
+                UPDATE payments
+                SET mp_order_id = COALESCE(mp_order_id, %s),
+                    checkout_url = COALESCE(%s, checkout_url)
+                WHERE external_reference = %s
+                  AND (mp_order_id IS NULL OR mp_order_id = %s)
+            """, (order_id, checkout_url, referencia, order_id))
+
+        if orden_actualizada.rowcount != 1:
+            app.logger.error(
+                "No se pudo asociar la orden creada al pago %s.",
+                referencia
+            )
+            estado_orden = "ambiguous"
+
+    if estado_orden == "ambiguous":
+        app.logger.warning(
+            "El inicio del pago quedo pendiente de confirmacion para %s.",
+            referencia
+        )
         flash(
-            "No pudimos iniciar el pago. RevisÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ la configuraciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n e intentÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ nuevamente.",
+            "El pago quedo pendiente de confirmacion. No inicies otro intento "
+            "hasta verificar el estado de esta operacion.",
             "error"
         )
         return redirect(url_for("vehicle_detail", vehicle_id=vehicle_id))
+
+    return redirect(checkout_url)
 
 
 
@@ -1115,9 +1209,16 @@ def mercado_pago_webhook():
         app.logger.error("Falta configurar el secreto o Access Token de Mercado Pago.")
         return "", 503
 
-    notificacion = request.get_json(silent=True) or {}
+    notificacion = request.get_json(silent=True)
+    if not isinstance(notificacion, dict):
+        return "", 400
+
+    datos_notificacion = notificacion.get("data")
+    if not isinstance(datos_notificacion, dict):
+        return "", 400
+
     data_id = request.args.get("data.id")
-    body_id = (notificacion.get("data") or {}).get("id")
+    body_id = datos_notificacion.get("id")
 
     if not data_id or str(body_id) != str(data_id):
         return "", 400
@@ -1129,8 +1230,11 @@ def mercado_pago_webhook():
     if notificacion.get("type") != "order":
         return "", 200
 
-    if notificacion.get("live_mode") is not True:
-        app.logger.warning("Se ignorÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³ una notificaciÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³n que no es de prueba.")
+    live_mode = notificacion.get("live_mode")
+    if not isinstance(live_mode, bool) or live_mode != is_production:
+        app.logger.warning(
+            "Se ignoró una notificación de Mercado Pago incompatible con AUTOMATCH_ENV."
+        )
         return "", 200
 
     try:
@@ -1145,6 +1249,10 @@ def mercado_pago_webhook():
 
         orden = respuesta.json()
 
+        if not isinstance(orden, dict):
+            app.logger.error("La respuesta de la orden no tiene un formato valido.")
+            return "", 503
+
         if str(orden.get("id")) != str(data_id):
             return "", 200
 
@@ -1154,10 +1262,63 @@ def mercado_pago_webhook():
         ):
             return "", 200
 
+        monedas_por_sitio = {"MLA": "ARS"}
+        moneda = monedas_por_sitio.get(orden.get("country_code"))
+        if moneda is None:
+            app.logger.warning("La orden proviene de un sitio no admitido.")
+            return "", 200
+
         referencia = orden.get("external_reference")
         importe_orden = Decimal(str(orden.get("total_amount")))
         importe_pagado = Decimal(str(orden.get("total_paid_amount")))
-        moneda = orden.get("currency") or orden.get("currency_id")
+
+        datos_transacciones = orden.get("transactions")
+        pagos_transaccion = (
+            datos_transacciones.get("payments")
+            if isinstance(datos_transacciones, dict)
+            else None
+        )
+        if not isinstance(pagos_transaccion, list) or not pagos_transaccion:
+            app.logger.warning("La orden no contiene pagos para validar.")
+            return "", 200
+
+        importes_transaccion = []
+        importes_acreditados = []
+        for pago_transaccion in pagos_transaccion:
+            if not isinstance(pago_transaccion, dict):
+                app.logger.warning("La orden contiene un pago invalido.")
+                return "", 200
+
+            if (
+                pago_transaccion.get("status") != "processed"
+                or pago_transaccion.get("status_detail") != "accredited"
+            ):
+                return "", 200
+
+            importe_transaccion = Decimal(
+                str(pago_transaccion.get("amount"))
+            )
+            importe_acreditado = Decimal(
+                str(pago_transaccion.get("paid_amount"))
+            )
+            if (
+                importe_transaccion <= 0
+                or importe_acreditado != importe_transaccion
+            ):
+                app.logger.warning(
+                    "El importe acreditado de una transaccion no coincide."
+                )
+                return "", 200
+
+            importes_transaccion.append(importe_transaccion)
+            importes_acreditados.append(importe_acreditado)
+
+        importe_total_transacciones = sum(
+            importes_transaccion, Decimal("0")
+        )
+        importe_total_acreditado = sum(
+            importes_acreditados, Decimal("0")
+        )
 
     except (requests.RequestException, ValueError, InvalidOperation, TypeError):
         app.logger.exception("Error al verificar la orden de Mercado Pago.")
@@ -1171,17 +1332,27 @@ def mercado_pago_webhook():
 
     with get_db() as db:
 
-        pago = db.execute("""
+        pagos = db.execute("""
             SELECT id, vehicle_id, plan_days, amount, currency,
                    status, external_reference, mp_order_id
             FROM payments
-            WHERE external_reference = %s AND mp_order_id = %s
+            WHERE external_reference = %s
+              AND (mp_order_id = %s OR mp_order_id IS NULL)
             FOR UPDATE
-        """, (referencia, str(data_id))).fetchone()
+        """, (referencia, str(data_id))).fetchall()
 
-        if not pago:
+        if len(pagos) > 1:
+            app.logger.error(
+                "Referencia externa duplicada; no se aplico la orden %s.",
+                data_id
+            )
+            abort(503)
+
+        if not pagos:
             app.logger.warning("Orden sin pago asociado en AUTOMATCH.")
             return "", 200
+
+        pago = pagos[0]
 
         if pago["status"] != "pending":
             return "", 200
@@ -1192,7 +1363,9 @@ def mercado_pago_webhook():
             dias not in planes
             or Decimal(str(pago["amount"])) != planes[dias]
             or importe_orden != planes[dias]
-            or importe_pagado < planes[dias]
+            or importe_pagado != planes[dias]
+            or importe_total_transacciones != planes[dias]
+            or importe_total_acreditado != planes[dias]
             or moneda != "ARS"
             or pago["currency"] != "ARS"
         ):
@@ -1231,13 +1404,22 @@ def mercado_pago_webhook():
 
         vencimiento = vehiculo_actualizado["featured_until"]
 
-        db.execute("""
+        pago_actualizado = db.execute("""
             UPDATE payments
-            SET status = 'approved',
+            SET mp_order_id = COALESCE(mp_order_id, %s),
+                status = 'approved',
                 approved_at = CURRENT_TIMESTAMP,
                 expires_at = %s
             WHERE id = %s AND status = 'pending'
-        """, (vencimiento, pago["id"]))
+              AND (mp_order_id IS NULL OR mp_order_id = %s)
+        """, (str(data_id), vencimiento, pago["id"], str(data_id)))
+
+        if pago_actualizado.rowcount != 1:
+            app.logger.error(
+                "No se pudo asociar la orden verificada al pago %s.",
+                pago["id"]
+            )
+            abort(503)
 
     app.logger.info("Orden de Mercado Pago verificada: %s", data_id)
     return "", 200

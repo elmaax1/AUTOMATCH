@@ -1,6 +1,10 @@
 AUTOMATCH - PROTOTIPO WEB V1
 ============================
 
+NOTA: Este documento describe el prototipo local inicial. La aplicación actual
+usa PostgreSQL y Supabase Storage; las instrucciones de SQLite y almacenamiento
+local que siguen ya no describen el despliegue actual.
+
 Qué incluye:
 - Catálogo de vehículos compartido dentro de la aplicación local.
 - Publicación de autos, motos, camionetas, utilitarios, camiones y otros.
@@ -46,3 +50,13 @@ pero la compra y activación de destacados todavía no está conectada a pagos.
 No uses datos personales reales ni publiques esta versión sin revisión de seguridad.
 Antes de producción hay que configurar una clave secreta segura, validación
 adicional de archivos, autenticación, protección contra spam y copias de seguridad.
+
+CONFIGURACIÓN ACTUAL PARA RENDER
+- Configurá AUTOMATCH_ENV=production en el servicio de producción.
+- AUTOMATCH_SECRET_KEY es obligatorio en producción y debe conservar el mismo
+  valor entre reinicios e instancias. El archivo .automatch_secret se usa como
+  alternativa únicamente fuera de producción.
+- Para probar Mercado Pago, usá un servicio de pruebas separado con
+  AUTOMATCH_ENV=test, credenciales sandbox y base de datos/almacenamiento
+  aislados. El servicio de producción solo procesa notificaciones live_mode=true.
+- No guardes valores secretos en este archivo ni en el repositorio.

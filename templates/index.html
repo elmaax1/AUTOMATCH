@@ -54,8 +54,13 @@
               <div class="no-photo">Sin fotografía</div>
             {% endif %}
           </a>
+          {% set share_location = v.province ~ (', ' ~ v.neighborhood if v.neighborhood else '') if v.province else v.location %}
+          {% set share_title = v.brand ~ ' ' ~ v.model ~ ' ' ~ v.year %}
+          {% set share_price = '$' ~ ('{:,.0f}'.format(v.price)) %}
+          {% set share_url = url_for('share_vehicle', vehicle_id=v.id, _external=True, _scheme='https') %}
+          {% set share_message = share_title ~ ' - ' ~ share_price ~ ' - ' ~ share_location ~ ' ' ~ share_url %}
           <a class="share-button" target="_blank" rel="noopener"
-             href="https://wa.me/?text={{ ('Mira este vehiculo: ' ~ v.brand ~ ' ' ~ v.model ~ ' - $' ~ ('{:,.0f}'.format(v.price)) ~ ' ' ~ url_for('share_vehicle', vehicle_id=v.id, _external=True, _scheme='https'))|urlencode }}"
+             href="https://wa.me/?text={{ share_message|urlencode }}"
              aria-label="Compartir {{ v.brand }} {{ v.model }} por WhatsApp">&#8599;</a>
           </div>
 

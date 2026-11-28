@@ -377,7 +377,8 @@ def share_vehicle(vehicle_id):
     with get_db() as db:
         vehicle = db.execute(
             """
-            SELECT v.id, v.brand, v.model, v.price,
+            SELECT v.id, v.brand, v.model, v.year, v.price,
+                   v.province, v.neighborhood, v.location,
                    (SELECT filename FROM vehicle_photos p
                     WHERE p.vehicle_id = v.id
                     ORDER BY p.is_cover DESC, p.id LIMIT 1) AS photo
@@ -389,6 +390,12 @@ def share_vehicle(vehicle_id):
 
     if vehicle is None:
         abort(404)
+
+    vehicle["share_location"] = (
+        f"{vehicle['province']}, {vehicle['neighborhood']}"
+        if vehicle["province"] and vehicle["neighborhood"]
+        else vehicle["province"] or vehicle["location"]
+    )
 
     if vehicle["photo"]:
         image_url = get_public_photo_url(vehicle["photo"])

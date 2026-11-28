@@ -1,5 +1,7 @@
 import os
+import re
 import unittest
+from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 import dotenv
@@ -45,13 +47,17 @@ class FakeDatabase:
         self.queries.append((normalized, params))
 
         if normalized.startswith(
-            "SELECT v.id, v.brand, v.model, v.price,"
+            "SELECT v.id, v.brand, v.model, v.year, v.price,"
         ):
             return FakeResult({
                 "id": self.vehicle["id"],
                 "brand": self.vehicle["brand"],
                 "model": self.vehicle["model"],
+                "year": self.vehicle["year"],
                 "price": self.vehicle["price"],
+                "province": self.vehicle["province"],
+                "neighborhood": self.vehicle["neighborhood"],
+                "location": self.vehicle["location"],
                 "photo": self.photos[0]["filename"],
             })
 
@@ -195,13 +201,40 @@ class PublicBrowsingTests(unittest.TestCase):
         )
 
         catalog = self.client.get("/")
-        self.assertIn(b"wa.me/?text=", catalog.data)
+        share_link = re.search(
+            rb'href="(https://wa\.me/\?text=[^"]+)"',
+            catalog.data,
+        ).group(1).decode("ascii")
+        message = parse_qs(urlparse(share_link).query)["text"][0]
+        self.assertEqual(
+            message,
+            "Toyota Corolla 2020 - $20,000,000 - "
+            "Córdoba, Nueva Córdoba "
+            "https://localhost/compartir/vehiculo/27",
+        )
+        self.assertNotIn("50,000", message)
+        self.assertNotIn("Mira", message)
+        self.assertNotIn("Mirá", message)
         self.assertIn(b"compartir", catalog.data)
 
         shared = self.client.get("/compartir/vehiculo/27")
         self.assertEqual(shared.status_code, 200)
         self.assertIn(b'href="/vehiculo/27"', shared.data)
         self.assertIn(b"Ver publicaci", shared.data)
+        self.assertIn(
+            b'<meta property="og:url" content="https://localhost/compartir/vehiculo/27">',
+            shared.data,
+        )
+        self.assertIn(
+            b'<meta property="og:image" content="https://storage.example.test/corolla-portada.jpg">',
+            shared.data,
+        )
+        self.assertIn(
+            'content="Toyota Corolla 2020 - $20,000,000 - Córdoba, Nueva Córdoba"'.encode("utf-8"),
+            shared.data,
+        )
+        self.assertNotIn(b"Mira esta publicacion", shared.data)
+        self.assertNotIn(b"50,000 km", shared.data)
         self.assertNotIn(b"Ingresar para ver los detalles", shared.data)
 
     def test_guest_is_sent_to_publication_registration(self):

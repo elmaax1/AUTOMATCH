@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block title %}{{ vehicle.brand }} {{ vehicle.model }} | AUTOMATCHCBA{% endblock %}
 {% block og_title %}{{ vehicle.brand }} {{ vehicle.model }} | AUTOMATCHCBA{% endblock %}
-{% block og_description %}{{ vehicle.brand }} {{ vehicle.model }} - ${{ "{:,.0f}".format(vehicle.price) }}. Mira esta publicacion en AUTOMATCHCBA.{% endblock %}
+{% block og_description %}{{ vehicle.brand }} {{ vehicle.model }} {{ vehicle.year }} - ${{ "{:,.0f}".format(vehicle.price) }} - {{ vehicle.share_location }}{% endblock %}
 {% block og_url %}{{ url_for("share_vehicle", vehicle_id=vehicle.id, _external=True, _scheme="https") }}{% endblock %}
 {% block og_image %}{{ image_url }}{% endblock %}
 {% block twitter_title %}{{ vehicle.brand }} {{ vehicle.model }} | AUTOMATCHCBA{% endblock %}
-{% block twitter_description %}{{ vehicle.brand }} {{ vehicle.model }} - ${{ "{:,.0f}".format(vehicle.price) }}. Mira esta publicacion en AUTOMATCHCBA.{% endblock %}
+{% block twitter_description %}{{ vehicle.brand }} {{ vehicle.model }} {{ vehicle.year }} - ${{ "{:,.0f}".format(vehicle.price) }} - {{ vehicle.share_location }}{% endblock %}
 {% block twitter_card %}summary_large_image{% endblock %}
 {% block twitter_image %}{{ image_url }}{% endblock %}
 {% block content %}

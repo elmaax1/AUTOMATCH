@@ -1,9 +1,12 @@
 import os
 import re
 import unittest
+import zipfile
+from io import BytesIO
 from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import dotenv
 
@@ -339,6 +342,141 @@ class PublicBrowsingTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Toyota", response.data)
         self.assertIn(b"Fotograf", response.data)
+        detail = self.client.get("/vehiculo/27")
+        self.assertIn(
+            b"Preparar para Facebook Marketplace",
+            detail.data,
+        )
+
+    def test_owner_can_prepare_marketplace_listing_data_and_photos(self):
+        owner_patch = patch.object(
+            automatch,
+            "current_user",
+            return_value=self.user,
+        )
+        owner_patch.start()
+        self.addCleanup(owner_patch.stop)
+        with self.client.session_transaction() as flask_session:
+            flask_session["user_id"] = self.user["id"]
+
+        response = self.client.get(
+            "/vehiculo/27/preparar-facebook-marketplace"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Toyota Corolla", response.data)
+        self.assertIn("Año: 2020".encode("utf-8"), response.data)
+        self.assertIn(b"Precio: $20.000.000,00", response.data)
+        self.assertIn(
+            "Ubicación: Córdoba, Nueva Córdoba".encode("utf-8"),
+            response.data,
+        )
+        self.assertIn(b"Muy buen estado", response.data)
+        self.assertIn(
+            "Copiar datos y descripción".encode("utf-8"),
+            response.data,
+        )
+        self.assertIn(
+            b"https://www.facebook.com/marketplace/create/vehicle",
+            response.data,
+        )
+        self.assertIn(b"/uploads/corolla-portada.jpg", response.data)
+        self.assertIn(b"/uploads/corolla-lateral.jpg", response.data)
+        self.assertIn(
+            b"/vehiculo/27/preparar-facebook-marketplace/fotos.zip",
+            response.data,
+        )
+        self.assertNotIn(b"200,000 km", response.data)
+
+    def test_marketplace_photo_zip_contains_original_storage_bytes(self):
+        owner_patch = patch.object(
+            automatch,
+            "current_user",
+            return_value=self.user,
+        )
+        owner_patch.start()
+        self.addCleanup(owner_patch.stop)
+        with self.client.session_transaction() as flask_session:
+            flask_session["user_id"] = self.user["id"]
+
+        original_photos = {
+            "https://storage.example.test/corolla-portada.jpg": b"original-cover",
+            "https://storage.example.test/corolla-lateral.jpg": b"original-side",
+        }
+
+        def download_original(url, timeout):
+            self.assertEqual(timeout, (3, 8))
+            return SimpleNamespace(
+                content=original_photos[url],
+                raise_for_status=lambda: None,
+            )
+
+        with patch.object(
+            automatch.requests,
+            "get",
+            side_effect=download_original,
+        ) as storage_get:
+            response = self.client.get(
+                "/vehiculo/27/preparar-facebook-marketplace/fotos.zip"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "application/zip")
+        self.assertIn("attachment;", response.headers["Content-Disposition"])
+        with zipfile.ZipFile(BytesIO(response.data)) as archive:
+            self.assertEqual(
+                set(archive.namelist()),
+                {"corolla-portada.jpg", "corolla-lateral.jpg"},
+            )
+            self.assertEqual(
+                archive.read("corolla-portada.jpg"),
+                b"original-cover",
+            )
+            self.assertEqual(
+                archive.read("corolla-lateral.jpg"),
+                b"original-side",
+            )
+        self.assertEqual(storage_get.call_count, 2)
+
+    def test_marketplace_preparation_is_restricted_to_listing_owner(self):
+        other_user = {**self.user, "id": 100}
+        owner_patch = patch.object(
+            automatch,
+            "current_user",
+            return_value=other_user,
+        )
+        owner_patch.start()
+        self.addCleanup(owner_patch.stop)
+        with self.client.session_transaction() as flask_session:
+            flask_session["user_id"] = other_user["id"]
+
+        response = self.client.get(
+            "/vehiculo/27/preparar-facebook-marketplace"
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_marketplace_zip_returns_gateway_error_when_storage_fails(self):
+        owner_patch = patch.object(
+            automatch,
+            "current_user",
+            return_value=self.user,
+        )
+        owner_patch.start()
+        self.addCleanup(owner_patch.stop)
+        with self.client.session_transaction() as flask_session:
+            flask_session["user_id"] = self.user["id"]
+
+        with patch.object(
+            automatch.requests,
+            "get",
+            side_effect=automatch.requests.Timeout("storage timeout"),
+        ):
+            response = self.client.get(
+                "/vehiculo/27/preparar-facebook-marketplace/fotos.zip"
+            )
+
+        self.assertEqual(response.status_code, 502)
 
 
 if __name__ == "__main__":

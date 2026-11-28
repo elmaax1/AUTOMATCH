@@ -1,7 +1,9 @@
+from io import BytesIO
 from pathlib import Path
 from datetime import timedelta
 from urllib.parse import urlsplit
 import os
+import zipfile
 import boto3
 import secrets
 import hashlib
@@ -13,7 +15,17 @@ import requests
 from functools import wraps
 from uuid import uuid4
 
-from flask import Flask, render_template, request, redirect, url_for, flash, abort, session
+from flask import (
+    Flask,
+    abort,
+    flash,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    session,
+    url_for,
+)
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
@@ -1564,6 +1576,106 @@ def vehicle_detail(vehicle_id):
         is_favorite=is_favorite,
         feature_csrf_token=session["feature_csrf_token"],
         csrf_token=get_form_csrf_token()
+    )
+
+
+def obtener_vehiculo_para_marketplace(vehicle_id):
+    user = current_user()
+    if not user:
+        abort(403)
+
+    with get_db() as db:
+        vehicle = db.execute(
+            "SELECT * FROM vehicles WHERE id = %s AND status = 'published'",
+            (vehicle_id,)
+        ).fetchone()
+        if vehicle is None:
+            abort(404)
+
+        if user["role"] != "admin" and vehicle["user_id"] != user["id"]:
+            abort(403)
+
+        photos = db.execute(
+            """SELECT filename FROM vehicle_photos
+               WHERE vehicle_id = %s
+               ORDER BY is_cover DESC, id""",
+            (vehicle_id,)
+        ).fetchall()
+
+    return vehicle, photos
+
+
+@app.route("/vehiculo/<int:vehicle_id>/preparar-facebook-marketplace")
+@login_required
+def preparar_facebook_marketplace(vehicle_id):
+    vehicle, photos = obtener_vehiculo_para_marketplace(vehicle_id)
+    ubicacion = (
+        f"{vehicle['province']}, {vehicle['neighborhood']}"
+        if vehicle.get("province") and vehicle.get("neighborhood")
+        else vehicle.get("province") or vehicle.get("location") or ""
+    )
+    descripcion = vehicle.get("description") or "Sin descripción."
+    texto_publicacion = "\n".join((
+        f"Marca y modelo: {vehicle['brand']} {vehicle['model']}",
+        f"Año: {vehicle['year']}",
+        f"Precio: ${precio_es(vehicle['price'])}",
+        f"Ubicación: {ubicacion}",
+        f"Descripción: {descripcion}",
+    ))
+
+    return render_template(
+        "prepare_facebook_marketplace.html",
+        vehicle=vehicle,
+        photos=photos,
+        ubicacion=ubicacion,
+        texto_publicacion=texto_publicacion,
+        facebook_marketplace_url=(
+            "https://www.facebook.com/marketplace/create/vehicle"
+        ),
+    )
+
+
+@app.route(
+    "/vehiculo/<int:vehicle_id>/preparar-facebook-marketplace/fotos.zip"
+)
+@login_required
+def descargar_fotos_facebook_marketplace(vehicle_id):
+    _vehicle, photos = obtener_vehiculo_para_marketplace(vehicle_id)
+    if not photos:
+        abort(404)
+
+    archivo_zip = BytesIO()
+    with zipfile.ZipFile(
+        archivo_zip,
+        mode="w",
+        compression=zipfile.ZIP_STORED,
+    ) as archive:
+        for index, photo in enumerate(photos, start=1):
+            try:
+                response = requests.get(
+                    get_public_photo_url(photo["filename"]),
+                    timeout=(3, 8),
+                )
+                response.raise_for_status()
+            except requests.RequestException as error:
+                app.logger.error(
+                    "No se pudo obtener una fotografia de Supabase Storage "
+                    "para preparar el ZIP (%s).",
+                    type(error).__name__,
+                )
+                abort(502)
+
+            nombre_archivo = (
+                secure_filename(photo["filename"]) or f"fotografia-{index}"
+            )
+            archive.writestr(nombre_archivo, response.content)
+
+    archivo_zip.seek(0)
+    return send_file(
+        archivo_zip,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"automatch-vehiculo-{vehicle_id}-fotos.zip",
     )
 
 

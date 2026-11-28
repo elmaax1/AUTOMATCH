@@ -54,6 +54,7 @@
     <h3>Descripción</h3>
     <p>{{ vehicle.description or "El vendedor no agregó una descripción." }}</p>
     {% if usuario_actual and (usuario_actual.role == 'admin' or usuario_actual.id == vehicle.user_id) %}
+    <a class="button" href="{{ url_for('preparar_facebook_marketplace', vehicle_id=vehicle.id) }}">Preparar para Facebook Marketplace</a>
     <a class="button" href="{{ url_for('vehicle_edit', vehicle_id=vehicle.id) }}">Editar publicación</a>
     <div class="contact-box feature-box">
       <h3>Destacar publicación</h3>

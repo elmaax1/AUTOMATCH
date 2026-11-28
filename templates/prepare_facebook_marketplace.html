@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Preparar para Facebook Marketplace | AUTOMATCHCBA{% endblock %}
+{% block content %}
+<div class="form-page">
+  <a class="back" href="{{ url_for('vehicle_detail', vehicle_id=vehicle.id) }}">← Volver a la publicación</a>
+  <p class="eyebrow">PUBLICACIÓN PREPARADA</p>
+  <h1>Preparar para Facebook Marketplace</h1>
+  <p class="muted">Copiá los datos y descargá las fotos originales para completar la publicación en Facebook. AUTOMATCHCBA no publica por vos ni accede a tu cuenta.</p>
+
+  <section class="form-card">
+    <h2>{{ vehicle.brand }} {{ vehicle.model }} · {{ vehicle.year }}</h2>
+    <p class="price">${{ vehicle.price|precio_es }}</p>
+    <p><strong>Ubicación:</strong> {{ ubicacion }}</p>
+    <h3>Descripción y datos para copiar</h3>
+    <textarea id="marketplace-copy-content" rows="8" readonly>{{ texto_publicacion }}</textarea>
+    <button class="button" id="copy-marketplace-content" type="button">Copiar datos y descripción</button>
+    <p id="copy-marketplace-status" class="muted" aria-live="polite"></p>
+  </section>
+
+  <section class="form-card">
+    <h2>Fotografías originales</h2>
+    {% if photos %}
+      <p class="muted">Las imágenes se descargan sin alterar su calidad.</p>
+      <div class="gallery">
+        {% for photo in photos %}
+        <a class="gallery-photo-link"
+           href="{{ url_for('uploaded_file', filename=photo.filename) }}"
+           target="_blank" rel="noopener"
+           aria-label="Abrir fotografía original {{ loop.index }}">
+          <img src="{{ url_for('uploaded_file', filename=photo.filename) }}"
+               alt="Fotografía {{ loop.index }} de {{ vehicle.brand }} {{ vehicle.model }}">
+        </a>
+        {% endfor %}
+      </div>
+      <a class="button" href="{{ url_for('descargar_fotos_facebook_marketplace', vehicle_id=vehicle.id) }}">Descargar todas las fotos (ZIP)</a>
+    {% else %}
+      <p class="muted">Esta publicación no tiene fotografías.</p>
+    {% endif %}
+  </section>
+
+  <section class="form-card">
+    <h2>Completar en Facebook</h2>
+    <p class="muted">Se abrirá Facebook Marketplace en la sección para publicar vehículos. Iniciá sesión allí si Facebook te lo solicita.</p>
+    <a class="button" href="{{ facebook_marketplace_url }}" target="_blank" rel="noopener">Abrir Facebook Marketplace</a>
+  </section>
+</div>
+
+<script>
+document.getElementById("copy-marketplace-content").addEventListener("click", async function () {
+  const content = document.getElementById("marketplace-copy-content");
+  const status = document.getElementById("copy-marketplace-status");
+
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(content.value);
+    } else {
+      content.focus();
+      content.select();
+      if (!document.execCommand("copy")) {
+        throw new Error("No se pudo copiar el texto.");
+      }
+    }
+    status.textContent = "Datos y descripción copiados.";
+  } catch (_error) {
+    content.focus();
+    content.select();
+    status.textContent = "No se pudo copiar automáticamente. Seleccioná el texto y copialo manualmente.";
+  }
+});
+</script>
+{% endblock %}

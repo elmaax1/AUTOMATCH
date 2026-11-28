@@ -130,7 +130,7 @@
 
                     <div>
                         <h3>{{ vehicle.brand }} {{ vehicle.model }} ({{ vehicle.year }})</h3>
-                        <p>Precio: ${{ "%.2f"|format(vehicle.price) }}</p>
+                        <p>Precio: ${{ vehicle.price|precio_es }}</p>
                         <p>Ubicaci?n: {{ vehicle.location }}</p>
                         <p>Propietario: {{ vehicle.owner_name or "Sin propietario asociado" }}</p>
                         <p>Tel?fono: {{ vehicle.owner_phone or "No informado" }}</p>

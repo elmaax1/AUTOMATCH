@@ -76,6 +76,12 @@ app.secret_key = get_app_secret_key(
     AUTOMATCH_ENV
 )
 
+
+@app.template_filter("precio_es")
+def precio_es(value):
+    return "{:,.2f}".format(value).translate(str.maketrans({",": ".", ".": ","}))
+
+
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 
 PROVINCES = [

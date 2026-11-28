@@ -1,6 +1,7 @@
 import os
 import re
 import unittest
+from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
@@ -160,12 +161,23 @@ class PublicBrowsingTests(unittest.TestCase):
         for item in reversed(self.patches):
             item.stop()
 
+    def test_price_formatter_uses_argentine_separators_and_two_decimals(self):
+        examples = (
+            (Decimal("5000000"), "5.000.000,00"),
+            (Decimal("850000.50"), "850.000,50"),
+            (Decimal("120000"), "120.000,00"),
+        )
+        for value, expected in examples:
+            with self.subTest(value=value):
+                self.assertEqual(automatch.precio_es(value), expected)
+
     def test_guest_can_browse_catalog_and_full_vehicle_details(self):
         catalog = self.client.get("/")
 
         self.assertEqual(catalog.status_code, 200)
         self.assertIn(b'href="/vehiculo/27"', catalog.data)
         self.assertIn(b"Toyota Corolla", catalog.data)
+        self.assertIn(b"$20.000.000,00", catalog.data)
         self.assertIn("Nueva Córdoba".encode("utf-8"), catalog.data)
         self.assertIn(b"2020", catalog.data)
         self.assertIn(b"50,000 km", catalog.data)
@@ -174,10 +186,7 @@ class PublicBrowsingTests(unittest.TestCase):
 
         self.assertEqual(detail.status_code, 200)
         self.assertIn(b"Toyota Corolla", detail.data)
-        self.assertIn(
-            b"20000000",
-            detail.data.replace(b",", b"").replace(b"$", b""),
-        )
+        self.assertIn(b"$20.000.000,00", detail.data)
         self.assertIn("Córdoba".encode("utf-8"), detail.data)
         self.assertIn("Nueva Córdoba".encode("utf-8"), detail.data)
         self.assertIn(b"Muy buen estado", detail.data)
@@ -208,7 +217,7 @@ class PublicBrowsingTests(unittest.TestCase):
         message = parse_qs(urlparse(share_link).query)["text"][0]
         self.assertEqual(
             message,
-            "Toyota Corolla 2020 - $20,000,000 - "
+            "Toyota Corolla 2020 - $20.000.000,00 - "
             "Córdoba, Nueva Córdoba "
             "https://localhost/compartir/vehiculo/27",
         )
@@ -230,7 +239,7 @@ class PublicBrowsingTests(unittest.TestCase):
             shared.data,
         )
         self.assertIn(
-            'content="Toyota Corolla 2020 - $20,000,000 - Córdoba, Nueva Córdoba"'.encode("utf-8"),
+            'content="Toyota Corolla 2020 - $20.000.000,00 - Córdoba, Nueva Córdoba"'.encode("utf-8"),
             shared.data,
         )
         self.assertNotIn(b"Mira esta publicacion", shared.data)

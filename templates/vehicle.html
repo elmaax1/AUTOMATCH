@@ -26,7 +26,7 @@
   <section class="detail-info">
     <p class="eyebrow">{{ vehicle.category }} · {{ vehicle.year }}</p>
     <h1>{{ vehicle.brand }} {{ vehicle.model }}</h1>
-    <p class="price large">${{ "{:,.0f}".format(vehicle.price) }}</p>
+    <p class="price large">${{ vehicle.price|precio_es }}</p>
 
     <form method="POST" action="{{ url_for('toggle_favorite', vehicle_id=vehicle.id) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
